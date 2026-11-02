@@ -20,6 +20,7 @@ static C3D_RenderTarget *g_target_top_left = NULL;
 static C3D_RenderTarget *g_target_top_right = NULL;
 static C3D_RenderTarget *g_target_bottom = NULL;
 static C2D_TextBuf g_text_buf = NULL;
+static float g_active_target_w = 400.0f;
 static bool g_prev_touching = false;
 static int g_last_touch_x = 0;
 static int g_last_touch_y = 0;
@@ -238,6 +239,7 @@ void pd_render_begin_frame(void) {
 
 void pd_render_begin_target(pd_render_target_t target, uint32_t clear_color) {
     C3D_RenderTarget *rt = g_target_top_left;
+    g_active_target_w = (target == PD_TARGET_BOTTOM) ? 320.0f : 400.0f;
     if (target == PD_TARGET_TOP_RIGHT) {
         rt = g_target_top_right;
     } else if (target == PD_TARGET_BOTTOM) {
@@ -296,7 +298,15 @@ void pd_draw_text(float x, float y, float scale, uint32_t color, const char *tex
     C2D_Text c2d_text;
     if (C2D_TextParse(&c2d_text, g_text_buf, text) != NULL) {
         C2D_TextOptimize(&c2d_text);
-        C2D_DrawText(&c2d_text, C2D_WithColor, x, y, 0.5f, scale, scale, color);
+        float sx = scale;
+        float sy = scale;
+        float avail_w = g_active_target_w - x - 6.0f;
+        if (avail_w > 24.0f && c2d_text.width * sx > avail_w) {
+            sx = avail_w / c2d_text.width;
+            if (sx < 0.30f) sx = 0.30f;
+        }
+        float y_adj = y - (sy * 4.0f);
+        C2D_DrawText(&c2d_text, C2D_WithColor, x, y_adj, 0.5f, sx, sy, color);
     }
 }
 
