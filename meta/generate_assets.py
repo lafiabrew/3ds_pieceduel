@@ -13,6 +13,7 @@ import os
 import struct
 import wave
 import zlib
+from generate_bnr_shared import draw_banner_text_centered, write_cbmd_bnr  # type: ignore
 
 
 def write_png(path: str, width: int, height: int, rgba_bytes: bytes) -> None:
@@ -88,7 +89,7 @@ def generate_icon(path: str) -> None:
     write_png(path, w, h, bytes(buf))
 
 
-def generate_banner(path: str) -> None:
+def generate_banner(path: str) -> bytes:
     w, h = 256, 128
     buf = bytearray(w * h * 4)
     for y in range(h):
@@ -100,15 +101,15 @@ def generate_banner(path: str) -> None:
             b = 42 + (y * 36) // h
             buf[idx : idx + 4] = bytes((r, g, b, 255))
 
-            # Draw 4x4 mini board emblem in center
-            bx = x - 80
-            by = y - 16
-            if 0 <= bx < 96 and 0 <= by < 96:
-                cell_x = bx // 24
-                cell_y = by // 24
-                lx = bx % 24
-                ly = by % 24
-                if lx in (0, 23) or ly in (0, 23):
+            # Draw 4x4 mini board emblem in upper center (x: 96..160, y: 12..76)
+            bx = x - 96
+            by = y - 12
+            if 0 <= bx < 64 and 0 <= by < 64:
+                cell_x = bx // 16
+                cell_y = by // 16
+                lx = bx % 16
+                ly = by % 16
+                if lx in (0, 15) or ly in (0, 15):
                     buf[idx : idx + 4] = bytes((70, 90, 130, 255))
                 else:
                     piece = cell_y * 4 + cell_x
@@ -116,19 +117,23 @@ def generate_banner(path: str) -> None:
                     square = (piece & 2) != 0
                     solid = (piece & 1) != 0
                     color = (245, 208, 105, 255) if light else (92, 168, 250, 255)
-                    dx = lx - 12
-                    dy = ly - 12
+                    dx = lx - 8
+                    dy = ly - 8
                     if square:
-                        inside = abs(dx) <= 6 and abs(dy) <= 6
-                        hole = not solid and abs(dx) <= 3 and abs(dy) <= 3
+                        inside = abs(dx) <= 4 and abs(dy) <= 4
+                        hole = not solid and abs(dx) <= 2 and abs(dy) <= 2
                     else:
                         r2 = dx * dx + dy * dy
-                        inside = r2 <= 40
-                        hole = not solid and r2 <= 12
+                        inside = r2 <= 20
+                        hole = not solid and r2 <= 6
                     if inside and not hole:
                         buf[idx : idx + 4] = bytes(color)
 
-    write_png(path, w, h, bytes(buf))
+    draw_banner_text_centered(buf, w, h, 86, "PIECEDUEL", 2, (245, 210, 105, 255))
+    draw_banner_text_centered(buf, w, h, 108, "STRATEGY BOARD GAME", 1, (185, 215, 255, 255))
+    raw = bytes(buf)
+    write_png(path, w, h, raw)
+    return raw
 
 
 def generate_audio(path: str) -> None:
@@ -175,9 +180,9 @@ def generate_bnr(path: str) -> None:
 def main() -> None:
     meta_dir = os.path.dirname(os.path.abspath(__file__))
     generate_icon(os.path.join(meta_dir, "icon.png"))
-    generate_banner(os.path.join(meta_dir, "banner.png"))
+    banner_rgba = generate_banner(os.path.join(meta_dir, "banner.png"))
     generate_audio(os.path.join(meta_dir, "audio.wav"))
-    generate_bnr(os.path.join(meta_dir, "banner.bnr"))
+    write_cbmd_bnr(os.path.join(meta_dir, "banner.bnr"), (523.25, 659.25, 783.99), banner_rgba)
     print("Generated meta/icon.png, meta/banner.png, meta/audio.wav, meta/banner.bnr")
 
 

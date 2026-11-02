@@ -6,8 +6,9 @@ BasicInfo:
   Logo                    : Nintendo
 
 TitleInfo:
-  UniqueId                : 0x0D3D0
+  UniqueId                : 0x0D3E0
   Category                : Application
+  Version                 : 3
 
 SystemControlInfo:
   StackSize               : 0x40000

@@ -13,6 +13,7 @@ meta/banner.cgfx
 meta/banner.bnr
 meta/audio.wav
 meta/audio.bcwav
+meta/__pycache__/
 tests/*.dat
 tests/*.tmp
 .wgm/

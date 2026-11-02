@@ -5,9 +5,9 @@
 #   make 3ds           - Build 3DS ARM11 .elf, .smdh, .3dsx, and .cia (via local devkitARM or OCI container)
 #   make netload IP=.. - Push 3ds_pieceduel.3dsx directly to CFW 3DS Homebrew Launcher over Wi-Fi
 
-APP_TITLE   := PieceDuel 3DS
-APP_DESC    := Shared-Trait 4-in-a-Row Strategy Duel (AI, Puzzles, 3DS/Web PvP)
-APP_AUTHOR  := SchwartzKamel
+APP_TITLE   := PieceDuel
+APP_DESC    := 4-in-a-Row Strategy Game
+APP_AUTHOR  := lafiabrew
 APP_CODE    := CTR-P-PD3D
 TARGET      := 3ds_pieceduel
 
@@ -91,6 +91,7 @@ test: test-host test-compat
 		-lcitro2d -lcitro3d -lctru -lm \
 		-o build/3ds/$(TARGET).elf
 	$(DEVKITPRO)/tools/bin/smdhtool --create "$(APP_TITLE)" "$(APP_DESC)" "$(APP_AUTHOR)" meta/icon.png build/3ds/$(TARGET).smdh
+	python3 -c 'import sys; sys.path.insert(0, "meta"); from generate_bnr_shared import patch_smdh_for_cia; patch_smdh_for_cia("build/3ds/$(TARGET).smdh")'
 	$(DEVKITPRO)/tools/bin/3dsxtool build/3ds/$(TARGET).elf build/3ds/$(TARGET).3dsx --smdh=build/3ds/$(TARGET).smdh
 	@if command -v makerom >/dev/null 2>&1; then \
 		makerom -f cia -o build/3ds/$(TARGET).cia -DAPP_ENCRYPTED=false -rsf meta/app.rsf -target t -exefslogo -elf build/3ds/$(TARGET).elf -icon build/3ds/$(TARGET).smdh -banner meta/banner.bnr; \
