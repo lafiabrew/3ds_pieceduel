@@ -1,13 +1,12 @@
 # 3ds_pieceduel
 
-**3ds_pieceduel** is a native C11 Nintendo 3DS homebrew edition of
-[**pieceduel**](https://github.com/SchwartzKamel/pieceduel) — a shared-trait
+**3ds_pieceduel** is a native C11 Nintendo 3DS homebrew shared-trait
 four-in-a-row abstract strategy duel (you hand your opponent the piece they must
 place). Built with `libctru` and `citro2d` for Custom Firmware (CFW) 3DS
 systems, it brings a stereoscopic 3D top-screen board, a stylus-driven
-bottom-screen touch board and 16-piece tray, bit-exact parity with
-`@pieceduel/engine`, and three-tier multiplayer (3DS Local Wireless, Wi-Fi LAN
-P2P, and live cross-play with a `pieceduel` web server).
+bottom-screen touch board and 16-piece tray, a deterministic alpha-beta AI and
+tactical puzzle engine, and three-tier multiplayer (3DS Local Wireless, Wi-Fi
+LAN P2P, and optional Socket.IO v4 server cross-play).
 
 ---
 
@@ -25,7 +24,7 @@ P2P, and live cross-play with a `pieceduel` web server).
 | **Multiplayer: Pass & Play** | Two players sharing one 3DS with optional beginner "hot square" threat hints | Implemented | `src/app.c` |
 | **Multiplayer: 3DS Wireless** | Ad-hoc 3DS-to-3DS Local Wireless via `libctru` `nwm::UDS` (no Wi-Fi router needed) | Implemented | `src/net/net_uds.c` |
 | **Multiplayer: LAN P2P** | Wi-Fi UDP beacon discovery (`:43210`) + TCP lockstep rooms (`:43211`) | Implemented | `src/net/net_p2p.c` |
-| **Multiplayer: Web Cross-Play** | Connects to `pieceduel` web server (`:4321`) over HTTP CSRF auth + Socket.IO v4 | Implemented | `src/net/net_web.c` |
+| **Multiplayer: Web Cross-Play** | Connects to a compatible Socket.IO v4 server (`:4321`) over HTTP CSRF auth + WebSocket | Implemented | `src/net/net_web.c` |
 | **SD Persistence** | CRC32-verified save (`sdmc:/3ds/pieceduel/save.dat`): streaks, Elo, stats, 20 replays | Implemented | `src/storage/storage.c` |
 | **CFW Packaging** | `.3dsx` + `.smdh` (Homebrew Launcher / `3dslink`) and `.cia` (FBI HOME Menu install) | Implemented | `Makefile`, `Containerfile.3ds`, `meta/app.rsf` |
 
@@ -88,7 +87,7 @@ flowchart TB
 ### Host Prerequisites
 - **3DS Packaging (`make 3ds`)**: Rootless `podman` or `docker` + `python3` (no host `devkitPro` installation required).
 - **Host Unit & UI Simulation (`make test-host`)**: `gcc` (with `libasan` / `libubsan`) and `make`.
-- **Cross-Language Differential & Network Compatibility (`make test-compat`)**: Node.js $\ge 22.15$ (uses built-in TypeScript stripping + `module.registerHooks`) and an upstream `pieceduel` checkout (defaults to `/home/lafiamafia/sandbox/pieceduel/packages/engine/src/index.ts`, overridable via `PIECEDUEL_ENGINE_PATH=/path/to/pieceduel/packages/engine/src/index.ts`).
+- **Compatibility & Network Test Suite (`make test-compat`)**: Node.js $\ge 22.15$ (runs automated LAN P2P, UDS simulation, Socket.IO v4 protocol tests, and deterministic engine parity checks).
 
 The build requires **zero host privileges**: if `DEVKITARM` is not installed on
 the host, `make 3ds` automatically builds inside an OCI container
@@ -141,16 +140,15 @@ From the Title Menu, select **`5. MULTIPLAYER (UDS/LAN/WEB)`**:
 1. **Pass-and-Play (Single 3DS)**: Choose **`2. PASS & PLAY (2P)`** directly from the Title Menu and pass the console after each turn.
 2. **3DS-to-3DS Local Wireless (`UDS`)**: Choose **`1. HOST 3DS LOCAL WIRELESS (UDS)`** on one 3DS and **`2. JOIN 3DS LOCAL WIRELESS (UDS)`** on the second 3DS. Uses Nintendo's local ad-hoc wireless (`nwm::UDS`, comm ID `0x50443344`) — no Wi-Fi router needed.
 3. **Wi-Fi LAN P2P (`UDP/TCP`)**: Choose **`3. HOST LAN P2P ROOM (UDP/TCP)`** on one device and **`4. SCAN & JOIN LAN P2P ROOM`** on another 3DS or PC host running on the same Wi-Fi network.
-4. **Cross-Play with `pieceduel` Web Server**:
-   - Start your `pieceduel` web server on your LAN host (e.g. `cd ~/sandbox/pieceduel && npm run dev`, listening on port `4321`).
-   - **Important on physical 3DS hardware**: The default server host `127.0.0.1:4321` is for host/emulator testing; on a physical 3DS you must press **X** (or tap **`X:HOST IP`** on the bottom bar) in the Multiplayer screen to open the 3DS software keyboard (`swkbd`) and enter your LAN machine's IP and port (e.g. `192.168.1.50:4321`).
-   - Select **`5. WEB SERVER CREATE ROOM (LOGIN)`** (prompts for username/password via `swkbd` if not yet signed in, defaulting to `demo` / `pieceduel123`, then creates a room and displays its 6-character invite code) or **`6. WEB SERVER JOIN / MATCHMAKE`** (or press **Y** / tap **`Y:INVITE`** to join a 6-character invite code directly; leave the prompt blank on row 6 to enter Ranked Matchmaking).
+4. **Cross-Play over HTTP / Socket.IO Server**:
+   - **Important on physical 3DS hardware**: The default server address `127.0.0.1:4321` is for local host/emulator testing; on a physical 3DS, press **X** (or tap **`X:HOST IP`** on the bottom bar) in the Multiplayer screen to open the 3DS software keyboard (`swkbd`) and enter your LAN server's IP and port (e.g. `192.168.1.50:4321`).
+   - Select **`5. WEB SERVER CREATE ROOM (LOGIN)`** (prompts for username/password via `swkbd` if not yet signed in, then creates a room and displays its 6-character invite code) or **`6. WEB SERVER JOIN / MATCHMAKE`** (or press **Y** / tap **`Y:INVITE`** to join a 6-character invite code directly; leave the prompt blank on row 6 to enter Ranked Matchmaking).
 
 ---
 
 ## Automated Compatibility & Verification Suite
 
-We validate engine parity, network protocol interoperability, UI rendering,
+We validate engine determinism, network protocol interoperability, UI rendering,
 ARM11 binary packaging, and documentation integrity automatically without
 requiring physical 3DS hardware in the loop:
 
@@ -158,8 +156,8 @@ requiring physical 3DS hardware in the loop:
 # Run native C11 unit tests + headless dual-screen UI/stereo simulation (with ASan/UBSan)
 make test-host
 
-# Run 580-check cross-language differential suite (C11 vs TypeScript @pieceduel/engine)
-# + automated LAN P2P, UDS simulation, and Socket.IO v4 Web Cross-Play integration tests
+# Run deterministic engine parity suite + automated LAN P2P, UDS simulation,
+# and Socket.IO v4 Web Cross-Play integration tests
 make test-compat
 
 # Run all host + compatibility tests
@@ -184,4 +182,4 @@ bash scripts/check-docs.sh
 ## Safety & Legal Notes
 
 - **Save Data Integrity**: Save data in `sdmc:/3ds/pieceduel/save.dat` is protected by an IEEE 802.3 CRC32 checksum; corrupted or mismatched save versions safely fall back to clean defaults without crashing.
-- **Legal**: Like upstream `pieceduel`, `3ds_pieceduel` is an independent project and is not affiliated with, endorsed by, or sponsored by Gigamic or Nintendo.
+- **Legal**: `3ds_pieceduel` is an independent project and is not affiliated with, endorsed by, or sponsored by Gigamic or Nintendo.
