@@ -112,10 +112,10 @@ Artifacts are written to `build/3ds/`:
 > **Note on `sdmc:/`**: In 3DS homebrew, `sdmc:/` refers to the root directory of your 3DS microSD card.
 
 ### Option 1: FBI QR Code / Network Server (`../serve_3ds.py` or `make qr`)
-1. Start the shared 3DS Homebrew QR & FBI Hub (auto-discovers all `.cia` and `.3dsx` packages under `/home/lafiamafia/homebrew/3ds/`):
+1. Start the shared 3DS Homebrew QR & FBI Hub (auto-discovers all `.cia` and `.3dsx` packages in the parent workspace directory):
    ```bash
    make qr
-   # or from /home/lafiamafia/homebrew/3ds:
+   # or from the parent directory:
    python3 ../serve_3ds.py
    ```
 2. On your 3DS, open **FBI → Remote Install → Scan QR Code** and scan the QR code printed in your terminal (or open `http://<your-lan-ip>:8765/` in a browser for a crisp SVG QR code and one-click **Push to FBI (:5000)**).

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * Automated Cross-Language Differential Compatibility Test Suite
- * Compares the C11 3DS engine (`build/host/pd_cli`) against the canonical
- * TypeScript `@pieceduel/engine` in `/home/lafiamafia/sandbox/pieceduel/packages/engine`
- * across PRNG, FNV-1a dateSeed, full AI playthroughs (standard, misere, advanced),
- * Daily Puzzles, Win-in-Two, Safe-Give, Threat-Drill, and Move Coaching (`reviewMove`).
+ * Compares the C11 3DS engine (`build/host/pd_cli`) against the reference
+ * TypeScript engine across PRNG, FNV-1a dateSeed, full AI playthroughs
+ * (standard, misere, advanced), Daily Puzzles, Win-in-Two, Safe-Give,
+ * Threat-Drill, and Move Coaching (`reviewMove`).
  */
 
 import assert from "node:assert/strict";
@@ -32,7 +32,7 @@ const ROOT = path.resolve(__dirname, "..");
 const PD_CLI = path.join(ROOT, "build", "host", "pd_cli");
 const ENGINE_INDEX = path.resolve(
   process.env.PIECEDUEL_ENGINE_PATH ??
-    "/home/lafiamafia/sandbox/pieceduel/packages/engine/src/index.ts",
+    path.join(ROOT, "..", "..", "..", "sandbox", "pieceduel", "packages", "engine", "src", "index.ts"),
 );
 
 function runCli(args) {
