@@ -45,19 +45,27 @@ static void with_piece(const int board[PD_BOARD_SIZE], int cell, int piece, int 
 }
 
 static bool has_non_losing_move(const pd_game_state_t *before, int held) {
+    int line_count = 0;
+    const pd_line_t *lines = pd_lines_for_variant(before->variant, &line_count);
     int empties[PD_BOARD_SIZE];
     int empties_count = pd_empty_cells(before->board, empties);
     for (int i = 0; i < empties_count; i++) {
         int cell = empties[i];
         int board[PD_BOARD_SIZE];
         with_piece(before->board, cell, held, board);
-        if (pd_is_win(board, PD_LINES, PD_STD_LINES_COUNT)) {
+        if (before->variant == PD_VARIANT_MISERE) {
+            if (!pd_is_win(board, lines, line_count)) {
+                return true;
+            }
+            continue;
+        }
+        if (pd_is_win(board, lines, line_count)) {
             return true;
         }
         if (pd_empty_cells(board, NULL) == 0) {
             return true;
         }
-        if (pd_safe_gives_for(board, before->available, before->available_count, PD_LINES, PD_STD_LINES_COUNT, NULL) > 0) {
+        if (pd_safe_gives_for(board, before->available, before->available_count, lines, line_count, NULL) > 0) {
             return true;
         }
     }
@@ -68,16 +76,19 @@ void pd_review_move(const pd_game_state_t *before, int played_cell, int played_g
     if (!before || !out) {
         return;
     }
+    int line_count = 0;
+    const pd_line_t *lines = pd_lines_for_variant(before->variant, &line_count);
     int held = before->piece_in_hand;
 
     int missed_win_cell = PD_NONE;
-    if (held != PD_NONE && played_cell != PD_NONE &&
-        !pd_would_win(before->board, played_cell, held, PD_LINES, PD_STD_LINES_COUNT)) {
+    if (before->variant != PD_VARIANT_MISERE &&
+        held != PD_NONE && played_cell != PD_NONE &&
+        !pd_would_win(before->board, played_cell, held, lines, line_count)) {
         int empties[PD_BOARD_SIZE];
         int empties_count = pd_empty_cells(before->board, empties);
         for (int i = 0; i < empties_count; i++) {
             int c = empties[i];
-            if (pd_would_win(before->board, c, held, PD_LINES, PD_STD_LINES_COUNT)) {
+            if (pd_would_win(before->board, c, held, lines, line_count)) {
                 missed_win_cell = c;
                 break;
             }
@@ -86,15 +97,16 @@ void pd_review_move(const pd_game_state_t *before, int played_cell, int played_g
 
     bool unsafe_give = false;
     int safer_give = PD_NONE;
-    if (played_give != PD_NONE && held != PD_NONE && played_cell != PD_NONE) {
+    if (before->variant != PD_VARIANT_MISERE &&
+        played_give != PD_NONE && held != PD_NONE && played_cell != PD_NONE) {
         int after_board[PD_BOARD_SIZE];
         with_piece(before->board, played_cell, held, after_board);
-        uint16_t mask = pd_winning_pieces_mask(after_board, PD_LINES, PD_STD_LINES_COUNT);
+        uint16_t mask = pd_winning_pieces_mask(after_board, lines, line_count);
         bool opponent_wins_with_gift = (mask & (uint16_t)(1u << played_give)) != 0;
         if (opponent_wins_with_gift) {
             int safe_same_cell[PD_PIECE_COUNT];
             int safe_count = pd_safe_gives_for(after_board, before->available, before->available_count,
-                                               PD_LINES, PD_STD_LINES_COUNT, safe_same_cell);
+                                               lines, line_count, safe_same_cell);
             if (safe_count > 0) {
                 unsafe_give = true;
                 safer_give = safe_same_cell[0];
@@ -105,7 +117,8 @@ void pd_review_move(const pd_game_state_t *before, int played_cell, int played_g
         }
     }
 
-    bool forced_loss = !unsafe_give && handed_forced_loss(before, played_cell, played_give);
+    bool forced_loss = (before->variant != PD_VARIANT_MISERE) &&
+                       !unsafe_give && handed_forced_loss(before, played_cell, played_give);
 
     out->missed_win_cell = missed_win_cell;
     out->unsafe_give = unsafe_give;

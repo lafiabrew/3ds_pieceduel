@@ -42,6 +42,7 @@ typedef struct {
     /* Active match state */
     pd_game_state_t game;
     pd_saved_game_t current_record;
+    bool match_recorded;
     int selected_cell;  /* 0..15 cursor on 4x4 board */
     int selected_piece; /* 0..15 cursor on 16-piece tray */
     int pending_cell;   /* cell chosen in step 1 of place+give, or PD_NONE */

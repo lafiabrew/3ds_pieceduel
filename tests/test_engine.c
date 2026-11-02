@@ -205,6 +205,28 @@ static void test_review_and_tutorial(void) {
     pd_review_move(&before, 5, 1, &rev);
     assert(rev.missed_win_cell == 3);
 
+    /* Advanced 2x2 square missed win */
+    pd_game_state_t adv_before;
+    pd_create_game(&adv_before, 0, PD_VARIANT_ADVANCED);
+    adv_before.board[0] = 8;
+    adv_before.board[1] = 9;
+    adv_before.board[4] = 10;
+    adv_before.piece_in_hand = 11;
+    adv_before.available[0] = 0;
+    adv_before.available[1] = 1;
+    adv_before.available_count = 2;
+
+    pd_move_review_t adv_rev;
+    pd_review_move(&adv_before, 15, 0, &adv_rev);
+    assert(adv_rev.missed_win_cell == 5);
+
+    /* Misere variant does not flag line completion as a missed win */
+    pd_game_state_t mis_before = before;
+    mis_before.variant = PD_VARIANT_MISERE;
+    pd_move_review_t mis_rev;
+    pd_review_move(&mis_before, 5, 1, &mis_rev);
+    assert(mis_rev.missed_win_cell == PD_NONE);
+
     pd_tutorial_data_t tut;
     pd_get_tutorial_data(&tut);
     assert(tut.find_win_piece == 9 && tut.find_win_cell == 3);

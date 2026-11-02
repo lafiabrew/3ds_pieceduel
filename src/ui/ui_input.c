@@ -16,7 +16,25 @@ __attribute__((weak)) bool pd_net_send_preview(pd_net_ctx_t *ctx, int cell) {
     }
     return true;
 }
+
+__attribute__((weak)) void pd_net_close(pd_net_ctx_t *ctx) {
+    if (ctx != NULL) {
+        ctx->mode = PD_NET_MODE_NONE;
+        ctx->state = PD_NET_STATE_IDLE;
+    }
+}
 #endif
+
+static void close_net_if_active(pd_app_t *app) {
+    if (app != NULL && app->net.mode != PD_NET_MODE_NONE) {
+        if (app->net.udp_fd == 0 && app->net.listen_fd == 0 && app->net.peer_fd == 0) {
+            app->net.udp_fd = -1;
+            app->net.listen_fd = -1;
+            app->net.peer_fd = -1;
+        }
+        pd_net_close(&app->net);
+    }
+}
 
 #define PD_BOT_BOARD_X 12
 #define PD_BOT_BOARD_Y 36
@@ -45,8 +63,8 @@ int pd_ui_hit_test_board(int touch_x, int touch_y) {
     if (col < 0 || col >= PD_BOARD_DIM || row < 0 || row >= PD_BOARD_DIM) {
         return PD_NONE;
     }
-    if ((rel_x % PD_BOT_BOARD_STRIDE) > PD_BOT_BOARD_CELL_SIZE ||
-        (rel_y % PD_BOT_BOARD_STRIDE) > PD_BOT_BOARD_CELL_SIZE) {
+    if ((rel_x % PD_BOT_BOARD_STRIDE) >= PD_BOT_BOARD_CELL_SIZE ||
+        (rel_y % PD_BOT_BOARD_STRIDE) >= PD_BOT_BOARD_CELL_SIZE) {
         return PD_NONE;
     }
     return row * PD_BOARD_DIM + col;
@@ -63,8 +81,8 @@ int pd_ui_hit_test_tray(int touch_x, int touch_y) {
     if (col < 0 || col >= 4 || row < 0 || row >= 4) {
         return PD_NONE;
     }
-    if ((rel_x % PD_BOT_TRAY_STRIDE) > PD_BOT_TRAY_CELL_SIZE ||
-        (rel_y % PD_BOT_TRAY_STRIDE) > PD_BOT_TRAY_CELL_SIZE) {
+    if ((rel_x % PD_BOT_TRAY_STRIDE) >= PD_BOT_TRAY_CELL_SIZE ||
+        (rel_y % PD_BOT_TRAY_STRIDE) >= PD_BOT_TRAY_CELL_SIZE) {
         return PD_NONE;
     }
     return row * 4 + col;
@@ -132,6 +150,14 @@ static bool commit_match_move(pd_app_t *app, pd_move_t move) {
     if (app == NULL) {
         return false;
     }
+    bool is_net = (app->selected_mode == PD_GAME_MODE_P2P_UDS ||
+                   app->selected_mode == PD_GAME_MODE_P2P_LAN ||
+                   app->selected_mode == PD_GAME_MODE_WEB_PVP);
+    if (is_net && app->net.state == PD_NET_STATE_ERROR) {
+        snprintf(app->status_banner, sizeof(app->status_banner), "CONNECTION LOST - PRESS B");
+        return false;
+    }
+
     int ply = app->game.move_count;
     int seat = app->game.current;
     int placed_piece = (move.kind == PD_MOVE_PLACE) ? app->game.piece_in_hand : PD_NONE;
@@ -140,6 +166,20 @@ static bool commit_match_move(pd_app_t *app, pd_move_t move) {
     if (!pd_apply_move(&app->game, move, &next_state)) {
         snprintf(app->status_banner, sizeof(app->status_banner), "ILLEGAL MOVE");
         return false;
+    }
+
+    if (is_net && app->net.mode != PD_NET_MODE_NONE) {
+        app->net.game_state = app->game;
+        if (!pd_net_send_move(&app->net, move)) {
+            snprintf(app->status_banner, sizeof(app->status_banner), "CONNECTION LOST - PRESS B");
+            return false;
+        }
+        if (app->net.mode == PD_NET_MODE_WEB) {
+            app->pending_cell = PD_NONE;
+            snprintf(app->status_banner, sizeof(app->status_banner), "WAITING FOR SERVER...");
+            return true;
+        }
+        app->net.state_updated = false;
     }
 
     app->current_record.valid = true;
@@ -171,10 +211,6 @@ static bool commit_match_move(pd_app_t *app, pd_move_t move) {
         }
     }
 
-    if (app->net.mode != PD_NET_MODE_NONE) {
-        pd_net_send_move(&app->net, move);
-    }
-
     if (app->game.status == PD_STATUS_WIN) {
         snprintf(app->status_banner, sizeof(app->status_banner),
                  "PLAYER %d WINS!", app->game.winner + 1);
@@ -203,7 +239,8 @@ static bool stage_or_finish_board_cell(pd_app_t *app, int cell) {
 
     int line_count = 0;
     const pd_line_t *lines = pd_lines_for_variant(app->game.variant, &line_count);
-    bool immediate_line = pd_would_win(app->game.board, cell, app->game.piece_in_hand, lines, line_count);
+    bool immediate_line = (app->game.variant != PD_VARIANT_MISERE) &&
+                          pd_would_win(app->game.board, cell, app->game.piece_in_hand, lines, line_count);
     if (immediate_line || app->game.available_count == 0) {
         pd_move_t terminal_move = { PD_MOVE_PLACE, cell, PD_NONE };
         return commit_match_move(app, terminal_move);
@@ -267,6 +304,7 @@ void pd_ui_handle_match_input(pd_app_t *app, const pd_input_t *input) {
 
     if (app->game.status != PD_STATUS_PLAYING) {
         if (btn_b) {
+            close_net_if_active(app);
             app->screen = PD_SCREEN_TITLE;
         }
         return;
@@ -278,6 +316,7 @@ void pd_ui_handle_match_input(pd_app_t *app, const pd_input_t *input) {
         app->net.state == PD_NET_STATE_ACTIVE &&
         app->game.current != app->net.my_seat) {
         if (btn_b) {
+            close_net_if_active(app);
             app->screen = PD_SCREEN_TITLE;
         }
         return;
@@ -325,6 +364,7 @@ void pd_ui_handle_match_input(pd_app_t *app, const pd_input_t *input) {
             }
             snprintf(app->status_banner, sizeof(app->status_banner), "PLACEMENT CANCELED");
         } else {
+            close_net_if_active(app);
             app->screen = PD_SCREEN_TITLE;
         }
         return;

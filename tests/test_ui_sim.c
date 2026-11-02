@@ -84,6 +84,8 @@ static void test_hit_testing(void) {
     assert(pd_ui_hit_test_board(4, 4) == PD_NONE);
     assert(pd_ui_hit_test_board(164, 80) == PD_NONE);
     assert(pd_ui_hit_test_board(50, 190) == PD_NONE);
+    /* 2px inter-cell gutter check on board */
+    assert(pd_ui_hit_test_board(12 + 34, 36 + 10) == PD_NONE);
 
     for (int row = 0; row < 4; row++) {
         for (int col = 0; col < 4; col++) {
@@ -94,6 +96,8 @@ static void test_hit_testing(void) {
     }
     assert(pd_ui_hit_test_tray(160, 60) == PD_NONE);
     assert(pd_ui_hit_test_tray(315, 60) == PD_NONE);
+    /* 2px inter-cell gutter check on tray */
+    assert(pd_ui_hit_test_tray(172 + 32, 36 + 10) == PD_NONE);
 
     for (int i = 0; i < 4; i++) {
         int tx = 12 + i * 74 + 20;
@@ -226,6 +230,43 @@ static void test_match_input_and_stereoscopic_render(void) {
         assert(count_non_clear_pixels(fb_bot, PD_BOT_WIDTH * PD_BOT_HEIGHT) > 500);
     }
 
+    /* Verify Puzzle Rush updates top-screen framebuffer after solving Puzzle #1 */
+    pd_app_t rush_app;
+    pd_app_init(&rush_app, "build/host/test_rush_save.dat");
+    /* Put a piece on rush_app.game.board first to ensure resolve_active_view does not get stuck on stale game.board */
+    rush_app.game.board[0] = 15;
+    pd_app_load_trainer(&rush_app, PD_TRAINER_RUSH, 1001u);
+    assert(rush_app.rush_active);
+    assert(rush_app.daily_puzzle.solution_count > 0);
+
+    static uint32_t fb_puzzle1[PD_TOP_WIDTH * PD_TOP_HEIGHT];
+    pd_ui_render(&rush_app, 0.0f);
+    memcpy(fb_puzzle1, fb_left, sizeof(fb_puzzle1));
+
+    rush_app.selected_cell = rush_app.daily_puzzle.solution[0];
+    memset(&in, 0, sizeof(in));
+    in.down = PD_BTN_A;
+    pd_app_update(&rush_app, &in);
+    assert(rush_app.rush_score == 1);
+    assert(rush_app.rush_streak == 1);
+
+    pd_ui_render(&rush_app, 0.0f);
+    assert(count_stereo_diff_pixels(fb_puzzle1, fb_left, PD_TOP_WIDTH * PD_TOP_HEIGHT) > 0);
+
+    /* Verify exiting a networked match with B closes app->net */
+    pd_app_start_match(&rush_app, PD_GAME_MODE_P2P_LAN, PD_DIFF_MEDIUM, PD_VARIANT_STANDARD);
+    rush_app.net.mode = PD_NET_MODE_LAN_P2P;
+    rush_app.net.state = PD_NET_STATE_ACTIVE;
+    rush_app.net.my_seat = 0;
+    rush_app.pending_cell = PD_NONE;
+    memset(&in, 0, sizeof(in));
+    in.down = PD_BTN_B;
+    pd_app_update(&rush_app, &in);
+    assert(rush_app.screen == PD_SCREEN_TITLE);
+    assert(rush_app.net.mode == PD_NET_MODE_NONE);
+
+    pd_app_shutdown(&rush_app);
+    remove("build/host/test_rush_save.dat");
     pd_platform_shutdown();
 }
 

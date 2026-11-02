@@ -73,6 +73,50 @@ static bool is_piece_in_available(const pd_game_state_t *g, int piece) {
     return false;
 }
 
+static bool is_piece_on_board(const int board[PD_BOARD_SIZE], int piece) {
+    for (int i = 0; i < PD_BOARD_SIZE; i++) {
+        if (board[i] == piece) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool is_piece_available_in_view(const pd_app_t *app,
+                                       const int board[PD_BOARD_SIZE],
+                                       int piece_in_hand,
+                                       int piece) {
+    if (!pd_is_piece_id(piece)) {
+        return false;
+    }
+    switch (app->screen) {
+    case PD_SCREEN_REPLAY:
+        return is_piece_in_available(&app->replay_state, piece);
+    case PD_SCREEN_TRAINERS:
+        if (app->trainer_kind == PD_TRAINER_SAFE_GIVE) {
+            return cell_in_list(piece, app->safe_give_puzzle.candidates,
+                                app->safe_give_puzzle.candidates_count);
+        }
+        if (app->trainer_kind == PD_TRAINER_WIN_IN_TWO) {
+            if (app->win2_step == 1 && board_has_any_piece(app->game.board)) {
+                return is_piece_in_available(&app->game, piece);
+            }
+            return cell_in_list(piece, app->win2_puzzle.available,
+                                app->win2_puzzle.available_count);
+        }
+        return (piece != piece_in_hand) && !is_piece_on_board(board, piece);
+    case PD_SCREEN_DAILY:
+        return (piece != piece_in_hand) && !is_piece_on_board(board, piece);
+    case PD_SCREEN_TUTORIAL:
+        if (app->tutorial_step == 2) {
+            return cell_in_list(piece, app->tutorial_data.safe_give_candidates, 4);
+        }
+        return (piece != piece_in_hand) && !is_piece_on_board(board, piece);
+    default:
+        return is_piece_in_available(&app->game, piece);
+    }
+}
+
 static void resolve_active_view(const pd_app_t *app,
                                 const int **out_board,
                                 int *out_piece_in_hand,
@@ -85,35 +129,78 @@ static void resolve_active_view(const pd_app_t *app,
     bool has_win = app->game.has_winning_line;
     pd_line_t win_line = app->game.winning_line;
 
-    if (app->screen == PD_SCREEN_REPLAY) {
+    switch (app->screen) {
+    case PD_SCREEN_DAILY:
+        board = app->daily_puzzle.board;
+        hand = app->daily_puzzle.piece_in_hand;
+        variant = app->selected_variant;
+        has_win = false;
+        break;
+
+    case PD_SCREEN_TRAINERS:
+        variant = app->selected_variant;
+        has_win = false;
+        switch (app->trainer_kind) {
+        case PD_TRAINER_PRACTICE:
+        case PD_TRAINER_RUSH:
+            board = app->daily_puzzle.board;
+            hand = app->daily_puzzle.piece_in_hand;
+            break;
+        case PD_TRAINER_WIN_IN_TWO:
+            if (app->win2_step == 1 && board_has_any_piece(app->game.board)) {
+                board = app->game.board;
+                hand = app->game.piece_in_hand;
+            } else {
+                board = app->win2_puzzle.board;
+                hand = app->win2_puzzle.piece_in_hand;
+            }
+            break;
+        case PD_TRAINER_SAFE_GIVE:
+            board = app->safe_give_puzzle.board;
+            hand = PD_NONE;
+            break;
+        case PD_TRAINER_HOT_SQUARES:
+            board = app->threat_drill_puzzle.board;
+            hand = PD_NONE;
+            break;
+        }
+        break;
+
+    case PD_SCREEN_TUTORIAL:
+        variant = PD_VARIANT_STANDARD;
+        has_win = false;
+        if (board_has_any_piece(app->game.board)) {
+            board = app->game.board;
+            hand = app->game.piece_in_hand;
+        } else if (app->tutorial_step == 2) {
+            board = app->tutorial_data.safe_give_board;
+            hand = PD_NONE;
+        } else {
+            board = app->tutorial_data.find_win_board;
+            hand = (app->tutorial_step == 1) ? app->tutorial_data.find_win_piece : PD_NONE;
+        }
+        break;
+
+    case PD_SCREEN_REPLAY:
         board = app->replay_state.board;
         hand = app->replay_state.piece_in_hand;
         variant = app->replay_state.variant;
         has_win = app->replay_state.has_winning_line;
         win_line = app->replay_state.winning_line;
-    } else if (app->screen == PD_SCREEN_DAILY && !board_has_any_piece(app->game.board) && app->daily_puzzle.pieces > 0) {
-        board = app->daily_puzzle.board;
-        hand = app->daily_puzzle.piece_in_hand;
-        variant = app->selected_variant;
-    } else if (app->screen == PD_SCREEN_TRAINERS && !board_has_any_piece(app->game.board)) {
-        variant = app->selected_variant;
-        if (app->trainer_kind == PD_TRAINER_WIN_IN_TWO && app->win2_puzzle.pieces > 0) {
-            board = app->win2_puzzle.board;
-            hand = app->win2_puzzle.piece_in_hand;
-        } else if (app->trainer_kind == PD_TRAINER_SAFE_GIVE && app->safe_give_puzzle.pieces > 0) {
-            board = app->safe_give_puzzle.board;
-            hand = (app->safe_give_puzzle.candidates_count > 0) ? app->safe_give_puzzle.candidates[0] : PD_NONE;
-        } else if (app->trainer_kind == PD_TRAINER_HOT_SQUARES && app->threat_drill_puzzle.pieces > 0) {
-            board = app->threat_drill_puzzle.board;
-            hand = PD_NONE;
-        }
-    } else if (app->screen == PD_SCREEN_TUTORIAL && !board_has_any_piece(app->game.board)) {
-        if (app->tutorial_step == 1) {
-            board = app->tutorial_data.find_win_board;
-            hand = app->tutorial_data.find_win_piece;
-        } else if (app->tutorial_step == 2) {
-            board = app->tutorial_data.safe_give_board;
-            hand = app->tutorial_data.safe_give_candidates[0];
+        break;
+
+    default:
+        break;
+    }
+
+    if (!has_win &&
+        (app->screen == PD_SCREEN_DAILY ||
+         app->screen == PD_SCREEN_TRAINERS ||
+         app->screen == PD_SCREEN_TUTORIAL)) {
+        int lc = 0;
+        const pd_line_t *lns = pd_lines_for_variant(variant, &lc);
+        if (pd_find_winning_line(board, lns, lc, &win_line)) {
+            has_win = true;
         }
     }
 
@@ -172,7 +259,8 @@ static void draw_piece_3d(int piece,
         pd_draw_rect(px - r, py - r, r * 2.0f, r * 2.0f, col_main);
         pd_draw_rect_outline(px - r, py - r, r * 2.0f, r * 2.0f, 1.5f, COL_PEDESTAL);
     } else {
-        pd_draw_circle(px, py, r, col_main);
+        pd_draw_circle(px, py, r, COL_PEDESTAL);
+        pd_draw_circle(px, py, (r > 2.0f) ? (r - 1.2f) : r, col_main);
     }
 
     /* Solid vs Hollow top center */
@@ -223,7 +311,10 @@ static void render_top_stereoscopic(const pd_app_t *app, float eye_sign, float s
     const pd_line_t *lines = pd_lines_for_variant(variant, &line_count);
     int threats[PD_BOARD_SIZE];
     int threat_count = 0;
-    if (app->save.show_threat_hints || app->screen == PD_SCREEN_TRAINERS) {
+    bool is_hot_squares = (app->screen == PD_SCREEN_TRAINERS &&
+                           app->trainer_kind == PD_TRAINER_HOT_SQUARES);
+    bool suppress_auto_threats = is_hot_squares && !app->trainer_revealed;
+    if ((app->save.show_threat_hints || app->screen == PD_SCREEN_TRAINERS) && !suppress_auto_threats) {
         threat_count = pd_threat_cells(board, lines, line_count, threats);
     }
 
@@ -254,7 +345,10 @@ static void render_top_stereoscopic(const pd_app_t *app, float eye_sign, float s
         pd_draw_rect(cx, cy, cell_size, cell_size, tile_col);
 
         /* Threat / Hot-square outline */
-        if (app->save.show_threat_hints && cell_in_list(cell, threats, threat_count)) {
+        if (is_hot_squares && (app->threat_found_mask & (uint16_t)(1u << cell)) != 0) {
+            pd_draw_rect_outline(cx + 1.0f, cy + 1.0f, cell_size - 2.0f, cell_size - 2.0f, 2.0f, COL_PENDING);
+        } else if (!suppress_auto_threats && app->save.show_threat_hints &&
+                   cell_in_list(cell, threats, threat_count)) {
             pd_draw_rect_outline(cx + 1.0f, cy + 1.0f, cell_size - 2.0f, cell_size - 2.0f, 2.0f, COL_THREAT);
         }
 
@@ -322,10 +416,16 @@ static void render_top_stereoscopic(const pd_app_t *app, float eye_sign, float s
 
     /* Piece-in-Hand 3D Showcase & Decoded 4-Trait Badges */
     pd_draw_rect(hud_x + 8.0f, 48.0f, 156.0f, 76.0f, COL_PANEL_ALT);
-    pd_draw_text(hud_x + 14.0f, 54.0f, 0.5f, COL_TEXT, "PIECE IN HAND");
+    int inspect_piece = pd_is_piece_id(piece_in_hand)
+                            ? piece_in_hand
+                            : ((app->cursor_on_tray && pd_is_piece_id(app->selected_piece))
+                                   ? app->selected_piece
+                                   : PD_NONE);
+    pd_draw_text(hud_x + 14.0f, 54.0f, 0.5f, COL_TEXT,
+                 pd_is_piece_id(piece_in_hand) ? "PIECE IN HAND" : "TRAY INSPECTOR");
 
-    if (pd_is_piece_id(piece_in_hand)) {
-        draw_piece_3d(piece_in_hand,
+    if (pd_is_piece_id(inspect_piece)) {
+        draw_piece_3d(inspect_piece,
                       hud_x + 38.0f,
                       92.0f,
                       16.0f,
@@ -334,9 +434,9 @@ static void render_top_stereoscopic(const pd_app_t *app, float eye_sign, float s
                       app->save.colorblind_mode);
 
         pd_attributes_t attrs;
-        pd_decode_piece(piece_in_hand, &attrs);
+        pd_decode_piece(inspect_piece, &attrs);
         char lbl[8];
-        pd_piece_short_label(piece_in_hand, lbl);
+        pd_piece_short_label(inspect_piece, lbl);
         pd_draw_text(hud_x + 68.0f, 68.0f, 0.55f, COL_ACCENT, lbl);
         pd_draw_text(hud_x + 68.0f, 80.0f, 0.5f, COL_TEXT,
                      attrs.tall ? "TALL  (+3D)" : "SHORT (LOW)");
@@ -379,14 +479,28 @@ static void render_top_stereoscopic(const pd_app_t *app, float eye_sign, float s
                  app->save.streak_current, app->save.streak_best);
         pd_draw_text(hud_x + 14.0f, 152.0f, 0.5f, COL_TEXT, d_buf);
     } else if (app->screen == PD_SCREEN_TRAINERS && app->rush_active) {
-        char r_buf[48];
-        snprintf(r_buf, sizeof(r_buf), "RUSH SCORE: %d  STRK: %d", app->rush_score, app->rush_strikes);
+        uint64_t now_ms = pd_platform_ticks_ms();
+        uint64_t rem_ms = (app->rush_end_ms > now_ms) ? (app->rush_end_ms - now_ms) : 0ULL;
+        unsigned total_sec = (unsigned)((rem_ms + 999ULL) / 1000ULL);
+        unsigned mins = total_sec / 60u;
+        unsigned secs = total_sec % 60u;
+        char r_buf[64];
+        snprintf(r_buf, sizeof(r_buf), "RUSH: %d  STRK: %d  %02u:%02u",
+                 app->rush_score, app->rush_streak, mins, secs);
         pd_draw_text(hud_x + 14.0f, 138.0f, 0.5f, COL_THREAT, r_buf);
     } else {
         char turn_buf[48];
         snprintf(turn_buf, sizeof(turn_buf), "SEAT: P%d   THREATS: %d",
                  app->game.current + 1, threat_count);
         pd_draw_text(hud_x + 14.0f, 138.0f, 0.5f, COL_TEXT, turn_buf);
+    }
+
+    if (app->cursor_on_tray && pd_is_piece_id(app->selected_piece)) {
+        char tray_lbl[8];
+        pd_piece_short_label(app->selected_piece, tray_lbl);
+        char tray_buf[48];
+        snprintf(tray_buf, sizeof(tray_buf), "TRAY #%d: %s", app->selected_piece, tray_lbl);
+        pd_draw_text(hud_x + 14.0f, 168.0f, 0.5f, COL_ACCENT, tray_buf);
     }
 
     if (app->status_banner[0] != '\0') {
@@ -411,6 +525,8 @@ static void render_bottom_board_and_tray(const pd_app_t *app) {
     pd_draw_text(172.0f, 8.0f, 0.5f, COL_TEXT_MUTED, "16-PIECE TRAY");
 
     /* Left 4x4 Touch Board Grid (x=12, y=36, stride=36, size=34) */
+    bool is_hot_squares = (app->screen == PD_SCREEN_TRAINERS &&
+                           app->trainer_kind == PD_TRAINER_HOT_SQUARES);
     for (int cell = 0; cell < PD_BOARD_SIZE; cell++) {
         int row = cell / 4;
         int col = cell % 4;
@@ -422,6 +538,10 @@ static void render_bottom_board_and_tray(const pd_app_t *app) {
             bg = PD_RGBA8(42, 84, 126, 255);
         }
         pd_draw_rect(x, y, 34.0f, 34.0f, bg);
+
+        if (is_hot_squares && (app->threat_found_mask & (uint16_t)(1u << cell)) != 0) {
+            pd_draw_rect_outline(x + 1.0f, y + 1.0f, 32.0f, 32.0f, 2.0f, COL_THREAT);
+        }
 
         if (cell == app->selected_cell && !app->cursor_on_tray) {
             pd_draw_rect_outline(x, y, 34.0f, 34.0f, 2.0f, COL_ACCENT);
@@ -441,7 +561,7 @@ static void render_bottom_board_and_tray(const pd_app_t *app) {
         float x = 172.0f + (float)col * 34.0f;
         float y = 36.0f + (float)row * 34.0f;
 
-        bool avail = is_piece_in_available(&app->game, p);
+        bool avail = is_piece_available_in_view(app, board, piece_in_hand, p);
         uint32_t slot_bg = avail ? COL_PANEL_ALT : PD_RGBA8(14, 18, 30, 255);
         pd_draw_rect(x, y, 32.0f, 32.0f, slot_bg);
 
@@ -554,11 +674,15 @@ static void render_bottom_multiplayer_or_stats(const pd_app_t *app) {
 
         snprintf(line, sizeof(line), "DAILY STREAK: %d (BEST %d)",
                  app->save.streak_current, app->save.streak_best);
-        pd_draw_text(16.0f, 132.0f, 0.5f, COL_THREAT, line);
+        pd_draw_text(16.0f, 128.0f, 0.5f, COL_THREAT, line);
+
+        snprintf(line, sizeof(line), "RUSH BEST: %d (STREAK %d)",
+                 app->save.rush_best_score, app->save.rush_best_streak);
+        pd_draw_text(16.0f, 146.0f, 0.5f, COL_ACCENT, line);
 
         snprintf(line, sizeof(line), "SAVED REPLAYS: %d (A: REVIEW)",
                  app->save.replay_count);
-        pd_draw_text(16.0f, 152.0f, 0.5f, COL_WIN_GLOW, line);
+        pd_draw_text(16.0f, 164.0f, 0.5f, COL_WIN_GLOW, line);
 
         const char *st_bar[4] = { "A:REPLAYS", "X:COLOR", "Y:HINTS", "B:BACK" };
         for (int i = 0; i < 4; i++) {

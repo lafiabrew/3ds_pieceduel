@@ -120,13 +120,11 @@ static void pd_app_record_move_transition(pd_saved_game_t *rec,
     rec->move_count += 1;
 }
 
-static bool g_match_recorded = false;
-
 static void pd_app_finalize_match_if_done(pd_app_t *app) {
-    if (!app || app->game.status == PD_STATUS_PLAYING || g_match_recorded) {
+    if (!app || app->game.status == PD_STATUS_PLAYING || app->match_recorded) {
         return;
     }
-    g_match_recorded = true;
+    app->match_recorded = true;
     app->current_record.valid = true;
     if (app->game.status == PD_STATUS_WIN) {
         app->current_record.winner = (int8_t)app->game.winner;
@@ -149,7 +147,7 @@ void pd_app_init(pd_app_t *app, const char *save_path) {
         return;
     }
     memset(app, 0, sizeof(*app));
-    g_match_recorded = false;
+    app->match_recorded = false;
     app->screen = PD_SCREEN_TITLE;
     app->running = true;
     app->menu_index = 0;
@@ -227,7 +225,7 @@ void pd_app_start_match(pd_app_t *app, pd_game_mode_t mode, pd_difficulty_t diff
     }
 
     memset(&app->current_record, 0, sizeof(app->current_record));
-    g_match_recorded = false;
+    app->match_recorded = false;
     app->current_record.valid = false;
     app->current_record.variant = variant;
     app->current_record.mode = mode;
@@ -395,9 +393,47 @@ void pd_app_open_replay(pd_app_t *app, int replay_index) {
     } else if (replay_index >= app->save.replay_count) {
         replay_index = app->save.replay_count - 1;
     }
+    if (replay_index >= PD_MAX_REPLAYS || !app->save.replays[replay_index].valid) {
+        replay_index = 0;
+    }
 
     app->replay_game_index = replay_index;
     app->replay_ply = 0;
+
+    const pd_saved_game_t *rec = &app->save.replays[replay_index];
+    int max_ply = (int)rec->move_count;
+    int blunders = 0;
+    int missed_wins = 0;
+    int forced_losses = 0;
+    pd_game_state_t scan_state;
+    pd_create_game(&scan_state, 0, rec->variant);
+    for (int i = 0; i < max_ply && i < PD_MAX_REPLAY_MOVES; i++) {
+        pd_move_review_t rev;
+        pd_review_move(&scan_state, (int)rec->moves[i].cell, (int)rec->moves[i].given_piece, &rev);
+        if (rev.missed_win_cell != PD_NONE) {
+            missed_wins += 1;
+        }
+        if (rev.unsafe_give) {
+            blunders += 1;
+        }
+        if (rev.forced_loss) {
+            forced_losses += 1;
+        }
+        pd_move_t m;
+        m.kind = (rec->moves[i].cell < 0) ? PD_MOVE_OPEN : PD_MOVE_PLACE;
+        m.cell = (int)rec->moves[i].cell;
+        m.give = (int)rec->moves[i].given_piece;
+        pd_game_state_t next_state;
+        if (!pd_apply_move(&scan_state, m, &next_state)) {
+            break;
+        }
+        scan_state = next_state;
+    }
+
+    app->replay_blunders = blunders;
+    app->replay_missed_wins = missed_wins;
+    app->replay_forced_losses = forced_losses;
+
     pd_app_step_replay(app, 0);
 }
 
@@ -441,38 +477,6 @@ void pd_app_step_replay(pd_app_t *app, int delta_ply) {
         const pd_replay_move_t *mv = &rec->moves[max_ply - 1];
         pd_review_move(&before_last, (int)mv->cell, (int)mv->given_piece, &app->replay_review);
     }
-
-    int blunders = 0;
-    int missed_wins = 0;
-    int forced_losses = 0;
-    pd_game_state_t scan_state;
-    pd_create_game(&scan_state, 0, rec->variant);
-    for (int i = 0; i < max_ply && i < PD_MAX_REPLAY_MOVES; i++) {
-        pd_move_review_t rev;
-        pd_review_move(&scan_state, (int)rec->moves[i].cell, (int)rec->moves[i].given_piece, &rev);
-        if (rev.missed_win_cell != PD_NONE) {
-            missed_wins += 1;
-        }
-        if (rev.unsafe_give) {
-            blunders += 1;
-        }
-        if (rev.forced_loss) {
-            forced_losses += 1;
-        }
-        pd_move_t m;
-        m.kind = (rec->moves[i].cell < 0) ? PD_MOVE_OPEN : PD_MOVE_PLACE;
-        m.cell = (int)rec->moves[i].cell;
-        m.give = (int)rec->moves[i].given_piece;
-        pd_game_state_t next_state;
-        if (!pd_apply_move(&scan_state, m, &next_state)) {
-            break;
-        }
-        scan_state = next_state;
-    }
-
-    app->replay_blunders = blunders;
-    app->replay_missed_wins = missed_wins;
-    app->replay_forced_losses = forced_losses;
 
     snprintf(app->status_banner, sizeof(app->status_banner),
              "Replay #%d Ply %d/%d (Blunders:%d Missed:%d)",
@@ -644,6 +648,15 @@ static void pd_app_update_match(pd_app_t *app, const pd_input_t *input) {
                 pd_app_record_move_transition(&app->current_record, &before_ai, &app->game);
                 app->pending_cell = PD_NONE;
                 app->cursor_on_tray = (app->game.piece_in_hand == PD_NONE);
+                if (app->game.status == PD_STATUS_WIN) {
+                    snprintf(app->status_banner, sizeof(app->status_banner),
+                             (app->game.winner == 1) ? "AI WINS!" : "YOU WIN!");
+                } else if (app->game.status == PD_STATUS_DRAW) {
+                    snprintf(app->status_banner, sizeof(app->status_banner), "DRAW GAME");
+                } else {
+                    snprintf(app->status_banner, sizeof(app->status_banner),
+                             "YOUR TURN - PLACE PIECE #%d", app->game.piece_in_hand);
+                }
             }
         }
     }
@@ -655,18 +668,25 @@ static void pd_app_dpad_move_grid(int *cursor, const pd_input_t *input) {
     if (!cursor || !input) {
         return;
     }
-    if (input->down & PD_BTN_DRIGHT) {
-        *cursor = (*cursor + 1) & 15;
+    int c = *cursor;
+    if (c < 0 || c >= 16) {
+        c = 0;
     }
-    if (input->down & PD_BTN_DLEFT) {
-        *cursor = (*cursor + 15) & 15;
+    int row = c / 4;
+    int col = c % 4;
+    if (input->down & PD_BTN_DUP) {
+        row = (row + 3) % 4;
     }
     if (input->down & PD_BTN_DDOWN) {
-        *cursor = (*cursor + 4) & 15;
+        row = (row + 1) % 4;
     }
-    if (input->down & PD_BTN_DUP) {
-        *cursor = (*cursor + 12) & 15;
+    if (input->down & PD_BTN_DLEFT) {
+        col = (col + 3) % 4;
     }
+    if (input->down & PD_BTN_DRIGHT) {
+        col = (col + 1) % 4;
+    }
+    *cursor = row * 4 + col;
 }
 
 static void pd_app_submit_daily_cell(pd_app_t *app, int cell) {
@@ -792,6 +812,10 @@ static void pd_app_advance_win2_opponent(pd_app_t *app, int first_cell, int firs
         app->win2_puzzle.board[opp_cell] = first_give;
     }
     app->win2_puzzle.piece_in_hand = opp_give;
+    memcpy(app->game.board, app->win2_puzzle.board, sizeof(app->game.board));
+    app->game.piece_in_hand = app->win2_puzzle.piece_in_hand;
+    memcpy(app->game.available, app->win2_puzzle.available, sizeof(app->game.available));
+    app->game.available_count = app->win2_puzzle.available_count;
     app->win2_step = 1;
     app->pending_cell = PD_NONE;
     app->cursor_on_tray = false;
@@ -961,6 +985,8 @@ static void pd_app_update_trainers(pd_app_t *app, const pd_input_t *input) {
                 if (pd_would_win(app->win2_puzzle.board, app->selected_cell,
                                  app->win2_puzzle.piece_in_hand, lines, line_count)) {
                     app->win2_puzzle.board[app->selected_cell] = app->win2_puzzle.piece_in_hand;
+                    memcpy(app->game.board, app->win2_puzzle.board, sizeof(app->game.board));
+                    app->game.piece_in_hand = PD_NONE;
                     app->trainer_solved = true;
                     snprintf(app->trainer_feedback, sizeof(app->trainer_feedback),
                              "Solved! Win in Two complete!");
@@ -1064,6 +1090,8 @@ static void pd_app_update_trainers(pd_app_t *app, const pd_input_t *input) {
                 app->trainer_solved = true;
                 app->puzzle_seed += 1u;
                 pd_generate_daily_puzzle(app->puzzle_seed, app->selected_variant, &app->daily_puzzle);
+                memcpy(app->game.board, app->daily_puzzle.board, sizeof(app->game.board));
+                app->game.piece_in_hand = app->daily_puzzle.piece_in_hand;
                 if (app->save_path[0] != '\0') {
                     pd_storage_save(&app->save, app->save_path);
                 }
