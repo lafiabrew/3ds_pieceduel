@@ -13,7 +13,14 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
+
+static uint64_t net_now_ms(void) {
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) != 0) return 0;
+    return (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)(tv.tv_usec / 1000);
+}
 
 static bool set_nonblocking_fd(int fd) {
 #ifdef TCP_NODELAY
@@ -138,22 +145,65 @@ static int http_request(const char *host, uint16_t port, const char *method,
         return -1;
     }
 
+    uint64_t deadline_ms = net_now_ms() + PD_NET_IO_TIMEOUT_MS;
     size_t total = 0;
+    char *hdr_end = NULL;
+    bool has_content_length = false;
+    size_t content_length = 0;
+
     while (total < resp_buf_size - 1) {
         ssize_t n = recv(fd, resp_buf + total, resp_buf_size - 1 - total, 0);
         if (n > 0) {
             total += (size_t)n;
+            resp_buf[total] = '\0';
+            if (!hdr_end) {
+                hdr_end = strstr(resp_buf, "\r\n\r\n");
+                if (hdr_end) {
+                    const char *p = resp_buf;
+                    while (p < hdr_end) {
+                        const char *line_end = strstr(p, "\r\n");
+                        if (!line_end || line_end > hdr_end) break;
+                        if ((size_t)(line_end - p) >= 15 &&
+                            strncasecmp(p, "Content-Length:", 15) == 0) {
+                            const char *val = p + 15;
+                            while (val < line_end && isspace((unsigned char)*val)) val++;
+                            char *endp = NULL;
+                            long cl = strtol(val, &endp, 10);
+                            if (endp != val && cl >= 0) {
+                                has_content_length = true;
+                                content_length = (size_t)cl;
+                            }
+                            break;
+                        }
+                        p = line_end + 2;
+                    }
+                }
+            }
+            if (hdr_end && has_content_length) {
+                size_t hdr_bytes = (size_t)((hdr_end + 4) - resp_buf);
+                if (total >= hdr_bytes + content_length) {
+                    break;
+                }
+            }
         } else if (n == 0) {
             break;
         } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            uint64_t now = net_now_ms();
+            if (now >= deadline_ms) {
+                break;
+            }
+            int wait_ms = (int)(deadline_ms - now);
             struct pollfd pfd;
             pfd.fd = fd;
             pfd.events = POLLIN;
             pfd.revents = 0;
-            if (poll(&pfd, 1, PD_NET_IO_TIMEOUT_MS) <= 0) {
+            if (poll(&pfd, 1, wait_ms) <= 0) {
                 break;
             }
         } else if (errno != EINTR) {
+            break;
+        }
+        if (net_now_ms() >= deadline_ms) {
             break;
         }
     }
@@ -166,7 +216,9 @@ static int http_request(const char *host, uint16_t port, const char *method,
         if (sp) status_code = atoi(sp + 1);
     }
 
-    char *hdr_end = strstr(resp_buf, "\r\n\r\n");
+    if (!hdr_end) {
+        hdr_end = strstr(resp_buf, "\r\n\r\n");
+    }
     if (out_body) {
         *out_body = hdr_end ? (hdr_end + 4) : (resp_buf + total);
     }
@@ -431,19 +483,28 @@ bool pd_net_web_matchmake(pd_net_ctx_t *ctx) {
     }
 
     ctx->game_id[0] = '\0';
-    extract_json_string(body, "id", ctx->game_id, sizeof(ctx->game_id));
+    if (!extract_json_string(body, "gameId", ctx->game_id, sizeof(ctx->game_id))) {
+        extract_json_string(body, "id", ctx->game_id, sizeof(ctx->game_id));
+    }
+    char mm_status[32] = {0};
+    if (extract_json_string(body, "status", mm_status, sizeof(mm_status))) {
+        if (strcmp(mm_status, "waiting") == 0) {
+            ctx->state = PD_NET_STATE_IN_LOBBY;
+        } else if (strcmp(mm_status, "matched") == 0) {
+            ctx->state = PD_NET_STATE_ACTIVE;
+        }
+    }
     return ctx->game_id[0] != '\0';
 }
 
-/* RFC 6455 masked client text frame sender */
-static bool ws_send_text_frame(pd_net_ctx_t *ctx, const char *payload) {
-    if (!ctx || ctx->peer_fd < 0 || !ctx->ws_handshake_done || !payload) return false;
-    size_t len = strlen(payload);
+/* RFC 6455 masked client frame sender */
+static bool ws_send_frame(pd_net_ctx_t *ctx, uint8_t opcode, const void *payload, size_t len) {
+    if (!ctx || ctx->peer_fd < 0 || !ctx->ws_handshake_done) return false;
     uint8_t frame[2048];
     if (len + 14 > sizeof(frame)) return false;
 
     size_t idx = 0;
-    frame[idx++] = 0x81; /* FIN=1, opcode=1 (text) */
+    frame[idx++] = (uint8_t)(0x80 | (opcode & 0x0F)); /* FIN=1 */
     if (len < 126) {
         frame[idx++] = (uint8_t)(0x80 | len);
     } else {
@@ -458,11 +519,90 @@ static bool ws_send_text_frame(pd_net_ctx_t *ctx, const char *payload) {
     frame[idx++] = mask[2];
     frame[idx++] = mask[3];
 
+    const uint8_t *p = (const uint8_t *)payload;
     for (size_t i = 0; i < len; i++) {
-        frame[idx++] = ((uint8_t)payload[i]) ^ mask[i & 3];
+        frame[idx++] = p[i] ^ mask[i & 3];
     }
 
     return send_all_blocking(ctx->peer_fd, frame, idx);
+}
+
+/* RFC 6455 masked client text frame sender */
+static bool ws_send_text_frame(pd_net_ctx_t *ctx, const char *payload) {
+    if (!payload) return false;
+    return ws_send_frame(ctx, 0x1, payload, strlen(payload));
+}
+
+/* Find `"key":` at top level (brace/bracket depth == 1) of a JSON object */
+static const char *find_top_level_json_value(const char *json, const char *key) {
+    if (!json || !key) return NULL;
+    size_t klen = strlen(key);
+    const char *p = json;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p != '{') return NULL;
+
+    int depth = 0;
+    while (*p) {
+        if (*p == '"') {
+            const char *str_start = p + 1;
+            p++;
+            while (*p && *p != '"') {
+                if (*p == '\\' && *(p + 1) != '\0') p += 2;
+                else p++;
+            }
+            const char *str_end = p;
+            if (*p == '"') p++;
+            if (depth == 1 && (size_t)(str_end - str_start) == klen &&
+                strncmp(str_start, key, klen) == 0) {
+                const char *q = p;
+                while (*q && isspace((unsigned char)*q)) q++;
+                if (*q == ':') {
+                    q++;
+                    while (*q && isspace((unsigned char)*q)) q++;
+                    return q;
+                }
+            }
+            continue;
+        }
+        if (*p == '{' || *p == '[') {
+            depth++;
+        } else if (*p == '}' || *p == ']') {
+            depth--;
+            if (depth <= 0) break;
+        }
+        p++;
+    }
+    return NULL;
+}
+
+static bool extract_top_level_json_string(const char *json, const char *key, char *out, size_t out_size) {
+    if (!out || out_size == 0) return false;
+    const char *p = find_top_level_json_value(json, key);
+    if (!p || *p != '"') return false;
+    p++;
+    size_t i = 0;
+    while (*p && *p != '"' && i < out_size - 1) {
+        if (*p == '\\' && *(p + 1) != '\0') p++;
+        out[i++] = *p++;
+    }
+    out[i] = '\0';
+    return true;
+}
+
+static bool extract_top_level_json_int(const char *json, const char *key, int *out_val, bool *is_null) {
+    const char *p = find_top_level_json_value(json, key);
+    if (!p) return false;
+    if (strncmp(p, "null", 4) == 0) {
+        if (is_null) *is_null = true;
+        if (out_val) *out_val = PD_NONE;
+        return true;
+    }
+    char *end = NULL;
+    long v = strtol(p, &end, 10);
+    if (end == p) return false;
+    if (is_null) *is_null = false;
+    if (out_val) *out_val = (int)v;
+    return true;
 }
 
 /* Extract a balanced `{...}` object starting after `"key":` */
@@ -585,8 +725,12 @@ static void handle_sio_frame(pd_net_ctx_t *ctx, const char *msg) {
         while (*payload && (*payload == ',' || isspace((unsigned char)*payload))) payload++;
 
         if (strcmp(event, "game:state") == 0) {
-            extract_json_string(payload, "id", ctx->game_id, sizeof(ctx->game_id));
-            extract_json_string(payload, "inviteCode", ctx->invite_code, sizeof(ctx->invite_code));
+            if (!extract_top_level_json_string(payload, "id", ctx->game_id, sizeof(ctx->game_id))) {
+                extract_json_string(payload, "id", ctx->game_id, sizeof(ctx->game_id));
+            }
+            if (!extract_top_level_json_string(payload, "inviteCode", ctx->invite_code, sizeof(ctx->invite_code))) {
+                extract_json_string(payload, "inviteCode", ctx->invite_code, sizeof(ctx->invite_code));
+            }
             parse_players_array(ctx, payload);
 
             char state_obj[2048];
@@ -596,9 +740,11 @@ static void handle_sio_frame(pd_net_ctx_t *ctx, const char *msg) {
                 }
             }
 
-            /* Parse room status outside "state" object */
+            /* Parse room status outside nested "state" object */
             char room_status[32] = {0};
-            extract_json_string(payload, "status", room_status, sizeof(room_status));
+            if (!extract_top_level_json_string(payload, "status", room_status, sizeof(room_status))) {
+                extract_json_string(payload, "status", room_status, sizeof(room_status));
+            }
             if (strcmp(room_status, "lobby") == 0) {
                 ctx->state = PD_NET_STATE_IN_LOBBY;
             } else if (strcmp(room_status, "active") == 0) {
@@ -608,8 +754,11 @@ static void handle_sio_frame(pd_net_ctx_t *ctx, const char *msg) {
                 if (ctx->game_state.status == PD_STATUS_PLAYING) {
                     int wseat = PD_NONE;
                     bool wnull = true;
-                    if (extract_json_int(payload, "winnerSeat", &wseat, &wnull) && !wnull &&
-                        (wseat == 0 || wseat == 1)) {
+                    bool has_wseat = extract_top_level_json_int(payload, "winnerSeat", &wseat, &wnull);
+                    if (!has_wseat) {
+                        has_wseat = extract_json_int(payload, "winnerSeat", &wseat, &wnull);
+                    }
+                    if (has_wseat && !wnull && (wseat == 0 || wseat == 1)) {
                         ctx->game_state.status = PD_STATUS_WIN;
                         ctx->game_state.winner = wseat;
                     } else {
@@ -711,9 +860,21 @@ static bool process_ws_rx_buffer(pd_net_ctx_t *ctx) {
             hdr_len = 4;
         } else if (payload_len == 127) {
             if (ctx->rx_len < 10) break;
+            if (buf[2] != 0 || buf[3] != 0 || buf[4] != 0 || buf[5] != 0) {
+                ctx->rx_len = 0;
+                snprintf(ctx->error_msg, sizeof(ctx->error_msg), "Oversized WS frame");
+                break;
+            }
             payload_len = ((size_t)buf[6] << 24) | ((size_t)buf[7] << 16) |
                           ((size_t)buf[8] << 8) | (size_t)buf[9];
             hdr_len = 10;
+        }
+
+        size_t full_hdr_len = hdr_len + (masked ? 4u : 0u);
+        if (payload_len > sizeof(ctx->rx_buf) - 16 || full_hdr_len + payload_len > sizeof(ctx->rx_buf)) {
+            ctx->rx_len = 0;
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg), "Oversized WS frame");
+            break;
         }
 
         uint8_t mask_key[4] = {0, 0, 0, 0};
@@ -725,7 +886,7 @@ static bool process_ws_rx_buffer(pd_net_ctx_t *ctx) {
 
         if (ctx->rx_len < hdr_len + payload_len) break;
 
-        char msg[4096];
+        char msg[8192];
         size_t copy_len = (payload_len < sizeof(msg) - 1) ? payload_len : (sizeof(msg) - 1);
         for (size_t i = 0; i < copy_len; i++) {
             uint8_t b = buf[hdr_len + i];
@@ -742,6 +903,9 @@ static bool process_ws_rx_buffer(pd_net_ctx_t *ctx) {
 
         if (opcode == 0x1) { /* Text frame */
             handle_sio_frame(ctx, msg);
+            handled = true;
+        } else if (opcode == 0x9) { /* Ping frame -> reply with masked Pong (0x8A) */
+            ws_send_frame(ctx, 0xA, msg, copy_len);
             handled = true;
         } else if (opcode == 0x8) { /* Close frame */
             close(ctx->peer_fd);

@@ -24,24 +24,37 @@ static bool set_nonblocking(int fd) {
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
+static void sanitize_wire_field(const char *src, char *dst, size_t dst_size) {
+    if (!dst || dst_size == 0) return;
+    size_t j = 0;
+    if (src) {
+        for (size_t i = 0; src[i] != '\0' && j < dst_size - 1; i++) {
+            char c = src[i];
+            if (c == '|' || c == '\n' || c == '\r') continue;
+            dst[j++] = c;
+        }
+    }
+    dst[j] = '\0';
+}
+
 void pd_net_p2p_close(pd_net_ctx_t *ctx) {
     if (!ctx) return;
-    if (ctx->udp_fd > 0) {
+    if (ctx->udp_fd >= 0) {
         close(ctx->udp_fd);
         ctx->udp_fd = -1;
     }
-    if (ctx->listen_fd > 0) {
+    if (ctx->listen_fd >= 0) {
         close(ctx->listen_fd);
         ctx->listen_fd = -1;
     }
-    if (ctx->peer_fd > 0 && ctx->mode == PD_NET_MODE_LAN_P2P) {
+    if (ctx->peer_fd >= 0 && ctx->mode == PD_NET_MODE_LAN_P2P) {
         close(ctx->peer_fd);
         ctx->peer_fd = -1;
     }
 }
 
 bool pd_net_p2p_send_line(pd_net_ctx_t *ctx, const char *line) {
-    if (!ctx || ctx->peer_fd <= 0 || !line) return false;
+    if (!ctx || ctx->peer_fd < 0 || !line) return false;
     size_t len = strlen(line);
     size_t sent = 0;
     while (sent < len) {
@@ -146,9 +159,12 @@ bool pd_net_p2p_send_beacon(pd_net_ctx_t *ctx, const char *dest_ip, uint16_t udp
         return false;
     }
 
+    char clean_name[32];
+    sanitize_wire_field(ctx->local_name, clean_name, sizeof(clean_name));
+
     char pkt[128];
     int len = snprintf(pkt, sizeof(pkt), "PDP2P_BEACON|%s|%u|%d\n",
-                       ctx->local_name, (unsigned)ctx->bound_tcp_port, (int)ctx->variant);
+                       clean_name, (unsigned)ctx->bound_tcp_port, (int)ctx->variant);
     if (len <= 0 || (size_t)len >= sizeof(pkt)) return false;
 
     ssize_t sent = sendto(ctx->udp_fd, pkt, (size_t)len, 0,
@@ -249,8 +265,11 @@ bool pd_net_p2p_connect(pd_net_ctx_t *ctx, const char *host_ip, uint16_t tcp_por
     ctx->preview_cell = PD_NONE;
     ctx->preview_piece = PD_NONE;
 
+    char clean_name[32];
+    sanitize_wire_field(ctx->local_name, clean_name, sizeof(clean_name));
+
     char hello[128];
-    snprintf(hello, sizeof(hello), "HELLO|%s\n", ctx->local_name);
+    snprintf(hello, sizeof(hello), "HELLO|%s\n", clean_name);
     pd_net_p2p_send_line(ctx, hello);
     return true;
 }
@@ -380,6 +399,9 @@ bool pd_net_p2p_poll(pd_net_ctx_t *ctx) {
             }
             ctx->rx_len = remaining;
             ctx->rx_buf[ctx->rx_len] = '\0';
+        } else if (ctx->rx_len >= sizeof(ctx->rx_buf) - 1) {
+            ctx->rx_len = 0;
+            ctx->rx_buf[0] = '\0';
         }
     }
 

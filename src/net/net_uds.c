@@ -21,6 +21,8 @@ typedef struct {
 static bool s_uds_ready = false;
 static udsBindContext s_bind_ctx;
 static bool s_bound = false;
+static udsNetworkStruct s_scanned_networks[PD_MAX_BEACONS];
+static size_t s_scanned_count = 0;
 
 bool pd_net_uds_send_line(pd_net_ctx_t *ctx, const char *line);
 
@@ -46,11 +48,17 @@ void pd_net_uds_close(pd_net_ctx_t *ctx) {
     }
     udsDestroyNetwork();
     udsDisconnectNetwork();
+    if (s_uds_ready && !s_bound) {
+        udsExit();
+        s_uds_ready = false;
+        s_scanned_count = 0;
+    }
 }
 
 bool pd_net_uds_host(pd_net_ctx_t *ctx, pd_variant_t variant) {
-    if (!ctx || !pd_net_uds_available()) return false;
+    if (!ctx) return false;
     pd_net_uds_close(ctx);
+    if (!pd_net_uds_available()) return false;
 
     udsNetworkStruct netstruct;
     static const char passphrase[] = "PieceDuel3DS_UDS";
@@ -89,6 +97,7 @@ bool pd_net_uds_scan(pd_net_ctx_t *ctx) {
     ctx->mode = PD_NET_MODE_UDS;
     ctx->state = PD_NET_STATE_SCANNING;
     ctx->beacon_count = 0;
+    s_scanned_count = 0;
 
     size_t tmp_size = 0x4000;
     void *tmp_buf = malloc(tmp_size);
@@ -102,7 +111,11 @@ bool pd_net_uds_scan(pd_net_ctx_t *ctx) {
     if (R_FAILED(rc) || !networks) return false;
 
     for (size_t i = 0; i < total_networks && ctx->beacon_count < PD_MAX_BEACONS; i++) {
-        pd_net_beacon_t *b = &ctx->beacons[ctx->beacon_count++];
+        int idx = ctx->beacon_count++;
+        s_scanned_networks[idx] = networks[i].network;
+        s_scanned_count = (size_t)ctx->beacon_count;
+
+        pd_net_beacon_t *b = &ctx->beacons[idx];
         memset(b, 0, sizeof(*b));
         b->is_uds = true;
         b->network_id = networks[i].network.networkID;
@@ -124,27 +137,15 @@ bool pd_net_uds_scan(pd_net_ctx_t *ctx) {
 
 bool pd_net_uds_connect(pd_net_ctx_t *ctx, int beacon_index) {
     if (!ctx || !pd_net_uds_available()) return false;
-    if (beacon_index < 0 || beacon_index >= ctx->beacon_count) return false;
-
-    size_t tmp_size = 0x4000;
-    void *tmp_buf = malloc(tmp_size);
-    if (!tmp_buf) return false;
-
-    udsNetworkScanInfo *networks = NULL;
-    size_t total_networks = 0;
-    Result rc = udsScanBeacons(tmp_buf, tmp_size, &networks, &total_networks,
-                               PD_UDS_WLAN_COMM_ID, 0, NULL, false);
-    free(tmp_buf);
-    if (R_FAILED(rc) || !networks || (size_t)beacon_index >= total_networks) {
-        free(networks);
+    if (beacon_index < 0 || beacon_index >= ctx->beacon_count ||
+        (size_t)beacon_index >= s_scanned_count) {
         return false;
     }
 
     static const char passphrase[] = "PieceDuel3DS_UDS";
-    rc = udsConnectNetwork(&networks[beacon_index].network, passphrase, sizeof(passphrase),
-                           &s_bind_ctx, UDS_BROADCAST_NETWORKNODEID,
-                           UDSCONTYPE_Client, PD_UDS_CHANNEL, UDS_DEFAULT_RECVBUFSIZE);
-    free(networks);
+    Result rc = udsConnectNetwork(&s_scanned_networks[beacon_index], passphrase, sizeof(passphrase),
+                                  &s_bind_ctx, UDS_BROADCAST_NETWORKNODEID,
+                                  UDSCONTYPE_Client, PD_UDS_CHANNEL, UDS_DEFAULT_RECVBUFSIZE);
     if (R_FAILED(rc)) return false;
 
     s_bound = true;

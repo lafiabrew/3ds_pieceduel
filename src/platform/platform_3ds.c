@@ -24,29 +24,65 @@ static bool g_prev_touching = false;
 static int g_last_touch_x = 0;
 static int g_last_touch_y = 0;
 
+static aptHookCookie g_apt_cookie;
+static uint64_t g_suspended_total_ms = 0;
+static uint64_t g_suspend_start_ms = 0;
+static bool g_is_suspended = false;
+
+static void pd_apt_hook_cb(APT_HookType hook, void *param) {
+    (void)param;
+    switch (hook) {
+        case APTHOOK_ONSLEEP:
+        case APTHOOK_ONSUSPEND:
+            if (!g_is_suspended) {
+                g_suspend_start_ms = (uint64_t)osGetTime();
+                g_is_suspended = true;
+            }
+            break;
+        case APTHOOK_ONWAKEUP:
+        case APTHOOK_ONRESTORE:
+            if (g_is_suspended) {
+                uint64_t now = (uint64_t)osGetTime();
+                if (now > g_suspend_start_ms) {
+                    g_suspended_total_ms += (now - g_suspend_start_ms);
+                }
+                g_is_suspended = false;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 static uint32_t map_3ds_keys(u32 k) {
     uint32_t out = 0;
     if (k & KEY_A) out |= PD_BTN_A;
     if (k & KEY_B) out |= PD_BTN_B;
     if (k & KEY_SELECT) out |= PD_BTN_SELECT;
     if (k & KEY_START) out |= PD_BTN_START;
-    if (k & (KEY_DRIGHT | KEY_CPAD_RIGHT)) out |= PD_BTN_DRIGHT;
-    if (k & (KEY_DLEFT | KEY_CPAD_LEFT)) out |= PD_BTN_DLEFT;
-    if (k & (KEY_DUP | KEY_CPAD_UP)) out |= PD_BTN_DUP;
-    if (k & (KEY_DDOWN | KEY_CPAD_DOWN)) out |= PD_BTN_DDOWN;
-    if (k & KEY_R) out |= PD_BTN_R;
-    if (k & KEY_L) out |= PD_BTN_L;
+    if (k & (KEY_DRIGHT | KEY_CPAD_RIGHT | KEY_CSTICK_RIGHT)) out |= PD_BTN_DRIGHT;
+    if (k & (KEY_DLEFT | KEY_CPAD_LEFT | KEY_CSTICK_LEFT)) out |= PD_BTN_DLEFT;
+    if (k & (KEY_DUP | KEY_CPAD_UP | KEY_CSTICK_UP)) out |= PD_BTN_DUP;
+    if (k & (KEY_DDOWN | KEY_CPAD_DOWN | KEY_CSTICK_DOWN)) out |= PD_BTN_DDOWN;
+    if (k & (KEY_R | KEY_ZR)) out |= PD_BTN_R;
+    if (k & (KEY_L | KEY_ZL)) out |= PD_BTN_L;
     if (k & KEY_X) out |= PD_BTN_X;
     if (k & KEY_Y) out |= PD_BTN_Y;
     return out;
 }
 
 bool pd_platform_init(void) {
+    osSetSpeedupEnable(true);
     gfxInitDefault();
     gfxSet3D(true);
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
     C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
     C2D_Prepare();
+
+    g_suspended_total_ms = 0;
+    g_suspend_start_ms = 0;
+    g_is_suspended = false;
+    aptHook(&g_apt_cookie, pd_apt_hook_cb, NULL);
 
     romfsInit();
     mkdir("sdmc:/3ds", 0777);
@@ -68,10 +104,12 @@ bool pd_platform_init(void) {
     g_last_touch_x = 0;
     g_last_touch_y = 0;
 
-    return g_target_top_left != NULL && g_target_bottom != NULL && g_text_buf != NULL;
+    return g_target_top_left != NULL && g_target_top_right != NULL &&
+           g_target_bottom != NULL && g_text_buf != NULL;
 }
 
 void pd_platform_shutdown(void) {
+    aptUnhook(&g_apt_cookie);
     if (g_text_buf != NULL) {
         C2D_TextBufDelete(g_text_buf);
         g_text_buf = NULL;
@@ -87,6 +125,7 @@ void pd_platform_shutdown(void) {
 
     romfsExit();
     gfxExit();
+    osSetSpeedupEnable(false);
 }
 
 bool pd_platform_main_loop(void) {
@@ -146,7 +185,12 @@ void pd_platform_get_utc_date(char out_iso_date[11]) {
 }
 
 uint64_t pd_platform_ticks_ms(void) {
-    return (uint64_t)osGetTime();
+    uint64_t now = (uint64_t)osGetTime();
+    uint64_t paused = g_suspended_total_ms;
+    if (g_is_suspended && now > g_suspend_start_ms) {
+        paused += (now - g_suspend_start_ms);
+    }
+    return (now > paused) ? (now - paused) : 0;
 }
 
 const char *pd_platform_default_save_path(void) {

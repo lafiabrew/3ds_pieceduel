@@ -13,13 +13,14 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
-const BUILD_DIR = path.join(ROOT, "build", "host");
+const BUILD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "pd-net-compat-"));
 const DRIVER_SRC = path.join(BUILD_DIR, "test_net_driver.c");
 const DRIVER_BIN = path.join(BUILD_DIR, "test_net_driver");
 
@@ -247,11 +248,19 @@ static int test_web_crossplay(uint16_t port) {
     pd_net_web_configure(&p1, "127.0.0.1", port, NULL);
 
     /* 1. Login via /api/auth/csrf + /api/auth/callback/credentials */
-    assert(pd_net_web_login(&p0, "alice", "secret123"));
+    assert(!pd_net_web_login(&p0, "alice", "wrongpass"));
+    assert(pd_net_web_login(&p0, "alice", "pieceduel123"));
     assert(strstr(p0.auth_cookie, "authjs.session-token=") != NULL);
 
-    assert(pd_net_web_login(&p1, "bob", "secret456"));
+    assert(pd_net_web_login(&p1, "bob", "pieceduel123"));
     assert(strstr(p1.auth_cookie, "authjs.session-token=") != NULL);
+
+    /* 1b. Test /api/matchmake upstream format {"status":"matched","gameId":"game-mm-1"}.
+     * Why: Upstream Piece Duel returns "gameId" (not "id") and "status":"matched"|"waiting"
+     * from POST /api/matchmake; verify we extract gameId and transition to PD_NET_STATE_ACTIVE. */
+    assert(pd_net_web_matchmake(&p0));
+    assert(strcmp(p0.game_id, "game-mm-1") == 0);
+    assert(p0.state == PD_NET_STATE_ACTIVE);
 
     /* 2. Alice creates a PvP game */
     assert(pd_net_web_create_game(&p0, "pvp", NULL));
@@ -572,9 +581,15 @@ async function runTests() {
       if (req.method === "POST" && req.url === "/api/auth/callback/credentials") {
         const params = new URLSearchParams(body);
         const identifier = params.get("identifier");
+        const password = params.get("password");
         const csrfToken = params.get("csrfToken");
         assert.equal(csrfToken, "csrf123");
         assert(identifier === "alice" || identifier === "bob");
+        if (password !== "pieceduel123") {
+          res.statusCode = 401;
+          res.end(JSON.stringify({ error: "invalid_credentials" }));
+          return;
+        }
         const token = `sess_${identifier}`;
         sessions.set(token, { userId: `uid_${identifier}`, username: identifier });
         res.statusCode = 302;
@@ -589,6 +604,13 @@ async function runTests() {
       if (!user) {
         res.statusCode = 401;
         res.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/matchmake") {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ status: "matched", gameId: "game-mm-1" }));
         return;
       }
 
@@ -774,8 +796,7 @@ async function runTests() {
     assert(pongReceivedCount >= 2, "Both clients should respond to Engine.IO ping (2 -> 3)");
   } finally {
     server.close();
-    fs.rmSync(DRIVER_SRC, { force: true });
-    fs.rmSync(DRIVER_BIN, { force: true });
+    fs.rmSync(BUILD_DIR, { recursive: true, force: true });
   }
 
   console.log("ALL NET COMPATIBILITY TESTS PASSED!");

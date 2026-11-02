@@ -97,10 +97,55 @@ bool pd_storage_save(pd_save_data_t *save, const char *path) {
         (void)remove(tmp_path);
         return false;
     }
+    char bak_path[512];
+    int bn = snprintf(bak_path, sizeof(bak_path), "%s.bak", path);
+    bool moved_to_bak = false;
+    if (bn > 0 && (size_t)bn < sizeof(bak_path)) {
+        struct stat st;
+        if (stat(path, &st) == 0) {
+            (void)remove(bak_path);
+            if (rename(path, bak_path) == 0) {
+                moved_to_bak = true;
+            }
+        }
+    }
+
     if (rename(tmp_path, path) != 0) {
         (void)remove(tmp_path);
+        if (moved_to_bak) {
+            (void)rename(bak_path, path);
+        }
         return false;
     }
+    return true;
+}
+
+static bool pd_storage_try_load_file(pd_save_data_t *save, const char *file_path) {
+    if (!save || !file_path || file_path[0] == '\0') {
+        return false;
+    }
+    FILE *fp = fopen(file_path, "rb");
+    if (!fp) {
+        return false;
+    }
+
+    pd_save_data_t tmp;
+    size_t n = fread(&tmp, 1, sizeof(pd_save_data_t), fp);
+    int extra = fgetc(fp);
+    fclose(fp);
+
+    if (n != sizeof(pd_save_data_t) || extra != EOF) {
+        return false;
+    }
+    if (tmp.magic != PD_SAVE_MAGIC || tmp.version != PD_SAVE_VERSION) {
+        return false;
+    }
+    uint32_t expected_crc = pd_storage_compute_crc(&tmp);
+    if (tmp.crc32 != expected_crc) {
+        return false;
+    }
+
+    *save = tmp;
     return true;
 }
 
@@ -113,33 +158,20 @@ bool pd_storage_load(pd_save_data_t *save, const char *path) {
         return false;
     }
 
-    FILE *fp = fopen(path, "rb");
-    if (!fp) {
-        pd_storage_init_default(save);
-        return false;
+    if (pd_storage_try_load_file(save, path)) {
+        return true;
     }
 
-    pd_save_data_t tmp;
-    size_t n = fread(&tmp, 1, sizeof(pd_save_data_t), fp);
-    int extra = fgetc(fp);
-    fclose(fp);
-
-    if (n != sizeof(pd_save_data_t) || extra != EOF) {
-        pd_storage_init_default(save);
-        return false;
-    }
-    if (tmp.magic != PD_SAVE_MAGIC || tmp.version != PD_SAVE_VERSION) {
-        pd_storage_init_default(save);
-        return false;
-    }
-    uint32_t expected_crc = pd_storage_compute_crc(&tmp);
-    if (tmp.crc32 != expected_crc) {
-        pd_storage_init_default(save);
-        return false;
+    char bak_path[512];
+    int bn = snprintf(bak_path, sizeof(bak_path), "%s.bak", path);
+    if (bn > 0 && (size_t)bn < sizeof(bak_path)) {
+        if (pd_storage_try_load_file(save, bak_path)) {
+            return true;
+        }
     }
 
-    *save = tmp;
-    return true;
+    pd_storage_init_default(save);
+    return false;
 }
 
 static bool pd_parse_iso_date(const char *iso, int *out_y, int *out_m, int *out_d) {

@@ -198,12 +198,26 @@ static const char *status_name(pd_status_t st) {
     }
 }
 
+static void sanitize_wire_str(const char *src, char *dst, size_t dst_size) {
+    if (!dst || dst_size == 0) return;
+    size_t j = 0;
+    if (src) {
+        for (size_t i = 0; src[i] != '\0' && j < dst_size - 1; i++) {
+            char c = src[i];
+            if (c == '|' || c == '\n' || c == '\r') continue;
+            dst[j++] = c;
+        }
+    }
+    dst[j] = '\0';
+}
+
 void pd_net_init(pd_net_ctx_t *ctx, const char *local_name) {
     if (!ctx) return;
     char saved_name[32] = {0};
     if (local_name && local_name[0] != '\0') {
-        snprintf(saved_name, sizeof(saved_name), "%s", local_name);
-    } else {
+        sanitize_wire_str(local_name, saved_name, sizeof(saved_name));
+    }
+    if (saved_name[0] == '\0') {
         snprintf(saved_name, sizeof(saved_name), "3DS_Player");
     }
     memset(ctx, 0, sizeof(*ctx));
@@ -566,12 +580,14 @@ void pd_net_handle_packet_line(pd_net_ctx_t *ctx, const char *line) {
     if (!ctx || !line || line[0] == '\0') return;
 
     if (strncmp(line, "HELLO|", 6) == 0) {
-        snprintf(ctx->opponent_name, sizeof(ctx->opponent_name), "%s", line + 6);
+        sanitize_wire_str(line + 6, ctx->opponent_name, sizeof(ctx->opponent_name));
         ctx->state = PD_NET_STATE_ACTIVE;
         ctx->state_updated = true;
         if (ctx->is_host) {
+            char clean_name[32];
+            sanitize_wire_str(ctx->local_name, clean_name, sizeof(clean_name));
             char hello_pkt[128];
-            snprintf(hello_pkt, sizeof(hello_pkt), "HELLO|%s\n", ctx->local_name);
+            snprintf(hello_pkt, sizeof(hello_pkt), "HELLO|%s\n", clean_name);
             send_lockstep_line(ctx, hello_pkt);
 
             char state_json[1024];
@@ -835,10 +851,15 @@ bool pd_net_send_chat(pd_net_ctx_t *ctx, const char *text) {
         return pd_net_web_send_chat(ctx, text);
     }
     if (ctx->mode == PD_NET_MODE_LAN_P2P || ctx->mode == PD_NET_MODE_UDS) {
-        snprintf(ctx->last_chat_sender, sizeof(ctx->last_chat_sender), "%s", ctx->local_name);
-        snprintf(ctx->last_chat, sizeof(ctx->last_chat), "%s", text);
+        char clean_sender[32];
+        char clean_text[204];
+        sanitize_wire_str(ctx->local_name, clean_sender, sizeof(clean_sender));
+        sanitize_wire_str(text, clean_text, sizeof(clean_text));
+        if (clean_text[0] == '\0') return false;
+        snprintf(ctx->last_chat_sender, sizeof(ctx->last_chat_sender), "%s", clean_sender);
+        snprintf(ctx->last_chat, sizeof(ctx->last_chat), "%s", clean_text);
         char pkt[300];
-        snprintf(pkt, sizeof(pkt), "CHAT|%s|%s\n", ctx->local_name, text);
+        snprintf(pkt, sizeof(pkt), "CHAT|%s|%s\n", clean_sender, clean_text);
         return send_lockstep_line(ctx, pkt);
     }
     return false;
