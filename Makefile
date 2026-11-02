@@ -40,6 +40,7 @@ APP_SRCS := \
 
 OCI_RUNTIME := $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
 OCI_IMAGE   := localhost/pieceduel-3ds-toolchain:latest
+OCI_USER    := $(if $(findstring podman,$(OCI_RUNTIME)),--userns=keep-id,-u $(shell id -u):$(shell id -g))
 
 .PHONY: all host test test-host test-compat 3ds 3ds-native 3ds-container assets verify-3ds netload clean
 
@@ -91,15 +92,15 @@ test: test-host test-compat
 		-o build/3ds/$(TARGET).elf
 	$(DEVKITPRO)/tools/bin/smdhtool --create "$(APP_TITLE)" "$(APP_DESC)" "$(APP_AUTHOR)" meta/icon.png build/3ds/$(TARGET).smdh
 	$(DEVKITPRO)/tools/bin/3dsxtool build/3ds/$(TARGET).elf build/3ds/$(TARGET).3dsx --smdh=build/3ds/$(TARGET).smdh
-	@if command -v bannertool >/dev/null 2>&1 && command -v makerom >/dev/null 2>&1; then \
-		bannertool makebanner -i meta/banner.png -a meta/audio.wav -o build/3ds/banner.bnr && \
-		bannertool makesmdh -s "$(APP_TITLE)" -l "$(APP_DESC)" -p "$(APP_AUTHOR)" -i meta/icon.png -o build/3ds/icon.icn && \
-		makerom -f cia -o build/3ds/$(TARGET).cia -DAPP_ENCRYPTED=false -rsf meta/app.rsf -target t -exefslogo -elf build/3ds/$(TARGET).elf -icon build/3ds/icon.icn -banner build/3ds/banner.bnr; \
+	@if command -v makerom >/dev/null 2>&1; then \
+		makerom -f cia -o build/3ds/$(TARGET).cia -DAPP_ENCRYPTED=false -rsf meta/app.rsf -target t -exefslogo -elf build/3ds/$(TARGET).elf -icon build/3ds/$(TARGET).smdh -banner meta/banner.bnr; \
 	fi
 
 3ds-container: assets
-	$(OCI_RUNTIME) build -f Containerfile.3ds -t $(OCI_IMAGE) .
-	$(OCI_RUNTIME) run --rm -v "$(CURDIR):/work:Z" -w /work $(OCI_IMAGE) make 3ds-native
+	@if ! $(OCI_RUNTIME) image inspect $(OCI_IMAGE) >/dev/null 2>&1; then \
+		$(OCI_RUNTIME) build -f Containerfile.3ds -t $(OCI_IMAGE) .; \
+	fi
+	$(OCI_RUNTIME) run --rm $(OCI_USER) -v "$(CURDIR):/work:Z" -w /work $(OCI_IMAGE) make 3ds-native
 
 3ds:
 	@if [ -n "$(DEVKITARM)" ] && [ -x "$(DEVKITARM)/bin/arm-none-eabi-gcc" ]; then \
@@ -120,4 +121,4 @@ netload:
 	fi
 
 clean:
-	rm -rf build/ meta/icon.png meta/banner.png meta/audio.wav
+	rm -rf build/ meta/icon.png meta/banner.png meta/audio.wav meta/banner.bnr

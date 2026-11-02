@@ -10,7 +10,10 @@ build/
 meta/icon.png
 meta/banner.png
 meta/banner.cgfx
+meta/banner.bnr
+meta/audio.wav
 meta/audio.bcwav
 tests/*.dat
 tests/*.tmp
+.wgm/
 node_modules/

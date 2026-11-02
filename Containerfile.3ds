@@ -6,21 +6,16 @@ ENV DEVKITPRO=/opt/devkitpro
 ENV DEVKITARM=/opt/devkitpro/devkitARM
 ENV PATH="${DEVKITPRO}/tools/bin:${DEVKITARM}/bin:${PATH}"
 
-# Install bannertool and makerom for .cia packaging alongside preinstalled 3ds-dev (libctru, citro2d, citro3d)
+# Install makerom for .cia packaging alongside preinstalled 3ds-dev (libctru, citro2d, citro3d, smdhtool, 3dsxtool, 3dslink)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     ca-certificates \
     curl \
     unzip \
-    xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && if ! command -v makerom >/dev/null 2>&1; then \
          curl -fsSL https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.4/makerom-v0.18.4-ubuntu_x86_64.zip -o /tmp/makerom.zip && \
          unzip -q /tmp/makerom.zip -d /usr/local/bin && chmod +x /usr/local/bin/makerom && rm -f /tmp/makerom.zip; \
-       fi \
-    && if ! command -v bannertool >/dev/null 2>&1; then \
-         curl -fsSL https://github.com/carstene1ns/3ds-bannertool/releases/download/1.2.3/bannertool-1.2.3-linux.tar.gz -o /tmp/bannertool.tar.gz && \
-         tar -xzf /tmp/bannertool.tar.gz --strip-components=1 -C /usr/local/bin && chmod +x /usr/local/bin/bannertool && rm -f /tmp/bannertool.tar.gz; \
        fi
 
 WORKDIR /work

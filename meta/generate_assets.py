@@ -1,3 +1,4 @@
+import base64
 #!/usr/bin/env python3
 """
 Deterministic generator for PieceDuel 3DS homebrew packaging assets:
@@ -148,12 +149,36 @@ def generate_audio(path: str) -> None:
         wf.writeframes(bytes(frames))
 
 
+
+CBMD_PREFIX_ZLIB_B64 = (
+    "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"
+)
+
+
+def generate_bnr(path: str) -> None:
+    prefix = zlib.decompress(base64.b64decode(CBMD_PREFIX_ZLIB_B64))
+    sample_rate = 22050
+    duration_s = 0.8
+    n_samples = int(sample_rate * duration_s)
+    frames = bytearray()
+    for i in range(n_samples):
+        t = i / sample_rate
+        freq = 523.25 if t < 0.25 else (659.25 if t < 0.5 else 783.99)
+        env = max(0.0, 1.0 - (t / duration_s))
+        val = int(12000 * env * math.sin(2.0 * math.pi * freq * t))
+        frames.extend(struct.pack("<h", val))
+    with open(path, "wb") as f:
+        f.write(prefix)
+        f.write(bytes(frames))
+
+
 def main() -> None:
     meta_dir = os.path.dirname(os.path.abspath(__file__))
     generate_icon(os.path.join(meta_dir, "icon.png"))
     generate_banner(os.path.join(meta_dir, "banner.png"))
     generate_audio(os.path.join(meta_dir, "audio.wav"))
-    print("Generated meta/icon.png, meta/banner.png, meta/audio.wav")
+    generate_bnr(os.path.join(meta_dir, "banner.bnr"))
+    print("Generated meta/icon.png, meta/banner.png, meta/audio.wav, meta/banner.bnr")
 
 
 if __name__ == "__main__":

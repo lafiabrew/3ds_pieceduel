@@ -49,7 +49,6 @@ bool pd_platform_init(void) {
     C2D_Prepare();
 
     romfsInit();
-    sdmcInit();
     mkdir("sdmc:/3ds", 0777);
     mkdir("sdmc:/3ds/pieceduel", 0777);
 
@@ -86,7 +85,6 @@ void pd_platform_shutdown(void) {
         g_soc_buffer = NULL;
     }
 
-    sdmcExit();
     romfsExit();
     gfxExit();
 }

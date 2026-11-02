@@ -69,7 +69,21 @@ static void pd_app_step_iso_date(const char *iso_in, int delta_days, char out_is
     } else if (y > 9999) {
         y = 9999;
     }
-    snprintf(out_iso, 11, "%04d-%02d-%02d", y, m, d);
+    if (m < 1) {
+        m = 1;
+    } else if (m > 12) {
+        m = 12;
+    }
+    if (d < 1) {
+        d = 1;
+    } else if (d > 31) {
+        d = 31;
+    }
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%04u-%02u-%02u",
+             (unsigned)y % 10000u, (unsigned)m % 100u, (unsigned)d % 100u);
+    memcpy(out_iso, tmp, 10);
+    out_iso[10] = '\0';
 }
 
 static void pd_app_record_move_transition(pd_saved_game_t *rec,

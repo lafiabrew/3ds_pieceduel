@@ -80,14 +80,28 @@ bool pd_storage_save(pd_save_data_t *save, const char *path) {
 
     pd_mkdir_parents(path);
 
-    FILE *fp = fopen(path, "wb");
+    char tmp_path[512];
+    int n = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    if (n <= 0 || (size_t)n >= sizeof(tmp_path)) {
+        return false;
+    }
+
+    FILE *fp = fopen(tmp_path, "wb");
     if (!fp) {
         return false;
     }
     size_t written = fwrite(save, sizeof(pd_save_data_t), 1, fp);
-    fflush(fp);
-    fclose(fp);
-    return written == 1;
+    int flush_rc = fflush(fp);
+    int close_rc = fclose(fp);
+    if (written != 1 || flush_rc != 0 || close_rc != 0) {
+        (void)remove(tmp_path);
+        return false;
+    }
+    if (rename(tmp_path, path) != 0) {
+        (void)remove(tmp_path);
+        return false;
+    }
+    return true;
 }
 
 bool pd_storage_load(pd_save_data_t *save, const char *path) {

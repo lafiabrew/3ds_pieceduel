@@ -9,6 +9,9 @@ TitleInfo:
   UniqueId                : 0x0D3D0
   Category                : Application
 
+SystemControlInfo:
+  StackSize               : 0x40000
+
 Option:
   UseOnSD                 : true
   EnableCompress          : true
