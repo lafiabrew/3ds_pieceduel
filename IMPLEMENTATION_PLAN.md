@@ -17,14 +17,14 @@ Native C11 Nintendo 3DS homebrew edition of `pieceduel` (`libctru` + `citro2d`) 
 - **Status:** done
 - **Objective:** Port `@pieceduel/engine` to pure C11 (`src/engine/*.c`) with host unit tests (`tests/test_engine.c`) and CLI bridge (`tests/pd_cli.c`).
 - **Files/areas:** `include/pd_engine.h`, `src/engine/`, `tests/test_engine.c`, `tests/pd_cli.c`
-- **Validation command:** `./build/host/test_engine`
+- **Validation command:** `make build/host/test_engine && ./build/host/test_engine`
 - **Evidence:** Exited 0 (`PASS: test_engine all checks succeeded.`).
 
 ### T2 Cross-Language Differential Compatibility (`compat-diff-tests`)
 - **Status:** done
 - **Objective:** Verify 100% bit-exact parity between C11 `pd_cli` and TypeScript `@pieceduel/engine` across Mulberry32 PRNG, FNV-1a `dateSeed`, AI playthroughs (`standard`/`misere`/`advanced`), Daily/Win-in-Two/Safe-Give/Threat-Drill puzzles, and `reviewMove`.
 - **Files/areas:** `tests/compat_diff.test.mjs`
-- **Validation command:** `node tests/compat_diff.test.mjs`
+- **Validation command:** `make build/host/pd_cli && node tests/compat_diff.test.mjs`
 - **Evidence:** Exited 0 (`PASS: All 580 cross-language differential checks matched bit-for-bit!`).
 
 ### T3 SD Card Persistence, Replays & Game Modes (`storage-and-modes`)
@@ -45,7 +45,7 @@ Native C11 Nintendo 3DS homebrew edition of `pieceduel` (`libctru` + `citro2d`) 
 - **Status:** done
 - **Objective:** Implement `citro2d` / `libctru` 3DS platform layer (`src/platform/platform_3ds.c`), host software rasterizer (`src/platform/platform_host.c`), stereoscopic 3D top-screen board + HUD (`src/ui/ui_render.c`), and bottom touch/button input (`src/ui/ui_input.c`).
 - **Files/areas:** `include/pd_platform.h`, `include/pd_ui.h`, `src/platform/`, `src/ui/`, `src/main.c`, `tests/test_ui_sim.c`
-- **Validation command:** `./build/host/test_ui_sim`
+- **Validation command:** `make build/host/test_ui_sim && ./build/host/test_ui_sim`
 - **Evidence:** Exited 0 (`test_ui_sim: ALL TESTS PASSED`).
 
 ### T6 OCI `devkitARM` Build & `.3dsx` / `.cia` Packaging (`3ds-build-and-cia`)
@@ -56,7 +56,8 @@ Native C11 Nintendo 3DS homebrew edition of `pieceduel` (`libctru` + `citro2d`) 
 - **Evidence:** Exited 0 (`PASS: Verified ARM11 ELF, SMDH (0x36C0), 3DSX, and CIA (0x2020) artifacts.`).
 
 ### T7 Rugged Remediation & Docs Audit (`rugged-and-docs-audit`)
-- **Status:** in progress
-- **Objective:** Remediate `/rugged` findings (1.5s non-blocking `poll()` timeouts in `net_web.c`, atomic `.tmp`+`rename` in `storage.c`, `libctru` UDS/SDMC fixes, pure-Python CBMD `.bnr` asset generation) and run the 5-role `wgm` docs-audit swarm (`docs/audit/`).
-- **Files/areas:** `src/net/`, `src/storage/`, `src/platform/`, `README.md`, `AGENTS.md`, `docs/audit/`, `scripts/check-docs.sh`
+- **Status:** done
+- **Objective:** Remediate `/rugged` findings (1.5s non-blocking `poll()` timeouts in `net_web.c` and `net_p2p.c`, atomic `.tmp`+`rename` in `storage.c`, `libctru` UDS/SDMC fixes, pure-Python CBMD `.bnr` asset generation) and run the 5-role `wgm` docs-audit swarm (`docs/audit/2026-11-02T0325Z_initial-3ds-release.md`), resolving all 10 Agent actions.
+- **Files/areas:** `src/net/`, `src/storage/`, `src/platform/`, `src/ui/`, `src/app.c`, `README.md`, `AGENTS.md`, `specs/`, `docs/audit/`, `scripts/check-docs.sh`
 - **Validation command:** `make test && make 3ds && make verify-3ds && bash scripts/check-docs.sh`
+- **Evidence:** Exited 0 (`test_engine`, `test_ui_sim`, 580-check `compat_diff.test.mjs`, `net_compat.test.mjs`, ARM11 `.elf`/`.smdh`/`.3dsx`/`.cia` build with `-Werror`, `audit.sh --check-report`, and `check-docs.sh` all passed).

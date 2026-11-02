@@ -5,6 +5,9 @@ REQUIRED_FILES=(
   "README.md"
   "AGENTS.md"
   "IMPLEMENTATION_PLAN.md"
+  "specs/CONSTITUTION.md"
+  "specs/CONTEXT.md"
+  "docs/audit/README.md"
   "Makefile"
   "Containerfile.3ds"
   "meta/app.rsf"
@@ -22,7 +25,13 @@ done
 python3 - <<'PY'
 import os, re, sys
 
-md_files = ["README.md", "AGENTS.md", "IMPLEMENTATION_PLAN.md"]
+md_files = [
+    "README.md",
+    "AGENTS.md",
+    "IMPLEMENTATION_PLAN.md",
+    "specs/CONSTITUTION.md",
+    "specs/CONTEXT.md",
+]
 if os.path.isdir("docs"):
     for root, _, files in os.walk("docs"):
         for fn in files:

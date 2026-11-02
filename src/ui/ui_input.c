@@ -296,13 +296,24 @@ void pd_ui_handle_match_input(pd_app_t *app, const pd_input_t *input) {
     if (btn_x) {
         if (hit_bar == 1) {
             app->save.show_threat_hints = !app->save.show_threat_hints;
+            snprintf(app->status_banner, sizeof(app->status_banner),
+                     app->save.show_threat_hints ? "THREAT HINTS: ON" : "THREAT HINTS: OFF");
         } else if (app->game.piece_in_hand != PD_NONE) {
             app->cursor_on_tray = !app->cursor_on_tray;
         }
     }
 
     if (btn_y) {
-        app->save.colorblind_mode = !app->save.colorblind_mode;
+        if (hit_bar == 2) {
+            app->save.colorblind_mode = !app->save.colorblind_mode;
+            snprintf(app->status_banner, sizeof(app->status_banner),
+                     app->save.colorblind_mode ? "COLOR-BLIND PALETTE: ON" : "COLOR-BLIND PALETTE: OFF");
+        } else {
+            app->save.show_threat_hints = !app->save.show_threat_hints;
+            snprintf(app->status_banner, sizeof(app->status_banner),
+                     app->save.show_threat_hints ? "THREAT HINTS: ON" : "THREAT HINTS: OFF");
+        }
+        return;
     }
 
     if (btn_b) {

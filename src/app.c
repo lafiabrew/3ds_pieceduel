@@ -1,6 +1,7 @@
 #include "pd_ui.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static bool pd_app_parse_iso_date(const char *iso, int *out_y, int *out_m, int *out_d) {
@@ -559,6 +560,12 @@ static void pd_app_update_title(pd_app_t *app, const pd_input_t *input) {
                 return;
             }
             app->menu_index = idx;
+        } else if (input->touch_y >= 194 && input->touch_y < 228) {
+            if (input->touch_x < 160) {
+                app->selected_variant = (pd_variant_t)(((int)app->selected_variant + 1) % 3);
+            } else {
+                app->selected_difficulty = (pd_difficulty_t)(((int)app->selected_difficulty + 1) % 3);
+            }
         }
     }
 
@@ -1162,15 +1169,25 @@ static void pd_app_update_tutorial(pd_app_t *app, const pd_input_t *input) {
 }
 
 static void pd_app_update_replay(pd_app_t *app, const pd_input_t *input) {
-    if (input->down & PD_BTN_B) {
+    int hit_bar = input->touch_just_pressed ? pd_ui_hit_test_bottom_bar(input->touch_x, input->touch_y) : PD_NONE;
+
+    if ((input->down & PD_BTN_B) || hit_bar == 3) {
         app->screen = PD_SCREEN_TITLE;
         return;
     }
-    if (input->down & (PD_BTN_L | PD_BTN_DLEFT)) {
+    if ((input->down & (PD_BTN_L | PD_BTN_DLEFT)) ||
+        (input->touch_just_pressed && hit_bar == PD_NONE && input->touch_x < 160)) {
         pd_app_step_replay(app, -1);
     }
-    if (input->down & (PD_BTN_R | PD_BTN_DRIGHT)) {
+    if ((input->down & (PD_BTN_R | PD_BTN_DRIGHT | PD_BTN_A)) || hit_bar == 0 ||
+        (input->touch_just_pressed && hit_bar == PD_NONE && input->touch_x >= 160)) {
         pd_app_step_replay(app, 1);
+    }
+    if (hit_bar == 1 || (input->down & PD_BTN_X)) {
+        app->save.show_threat_hints = !app->save.show_threat_hints;
+    }
+    if (hit_bar == 2 || (input->down & PD_BTN_Y)) {
+        app->save.colorblind_mode = !app->save.colorblind_mode;
     }
     if ((input->down & PD_BTN_DUP) && app->save.replay_count > 0) {
         int next_idx = (app->replay_game_index + app->save.replay_count - 1) % app->save.replay_count;
@@ -1179,6 +1196,45 @@ static void pd_app_update_replay(pd_app_t *app, const pd_input_t *input) {
     if ((input->down & PD_BTN_DDOWN) && app->save.replay_count > 0) {
         int next_idx = (app->replay_game_index + 1) % app->save.replay_count;
         pd_app_open_replay(app, next_idx);
+    }
+}
+
+static void pd_app_parse_host_port(pd_app_t *app, const char *input_str) {
+    if (!app || !input_str || input_str[0] == '\0') return;
+    const char *colon = strchr(input_str, ':');
+    if (colon) {
+        size_t hlen = (size_t)(colon - input_str);
+        if (hlen > 0 && hlen < sizeof(app->save.server_host)) {
+            memcpy(app->save.server_host, input_str, hlen);
+            app->save.server_host[hlen] = '\0';
+        }
+        int p = atoi(colon + 1);
+        if (p > 0 && p <= 65535) {
+            app->save.server_port = (uint16_t)p;
+        }
+    } else {
+        snprintf(app->save.server_host, sizeof(app->save.server_host), "%.127s", input_str);
+    }
+}
+
+static void pd_app_ensure_web_login(pd_app_t *app) {
+    pd_net_web_configure(&app->net, app->save.server_host,
+                         app->save.server_port, app->save.session_cookie);
+    if (app->net.auth_cookie[0] != '\0') {
+        return;
+    }
+    char user[64];
+    char pass[64];
+    snprintf(user, sizeof(user), "%s", app->save.web_username[0] ? app->save.web_username : "demo");
+    snprintf(pass, sizeof(pass), "pieceduel123");
+    (void)pd_platform_prompt_text("Web Username", user, sizeof(user), false);
+    (void)pd_platform_prompt_text("Web Password", pass, sizeof(pass), true);
+    if (user[0] != '\0' && pd_net_web_login(&app->net, user, pass)) {
+        snprintf(app->save.web_username, sizeof(app->save.web_username), "%.63s", user);
+        snprintf(app->save.session_cookie, sizeof(app->save.session_cookie), "%.511s", app->net.auth_cookie);
+        if (app->save_path[0] != '\0') {
+            pd_storage_save(&app->save, app->save_path);
+        }
     }
 }
 
@@ -1197,7 +1253,10 @@ static void pd_app_update_multiplayer(pd_app_t *app, const pd_input_t *input) {
         }
     }
 
-    if (input->down & PD_BTN_B) {
+    int hit_bar = input->touch_just_pressed ? pd_ui_hit_test_bottom_bar(input->touch_x, input->touch_y) : PD_NONE;
+    bool activate_row = (input->down & PD_BTN_A) != 0 || (hit_bar == 0);
+
+    if ((input->down & PD_BTN_B) || hit_bar == 3) {
         pd_net_close(&app->net);
         app->screen = PD_SCREEN_TITLE;
         return;
@@ -1210,9 +1269,25 @@ static void pd_app_update_multiplayer(pd_app_t *app, const pd_input_t *input) {
         app->mp_menu_index = (app->mp_menu_index + 1) % 6;
     }
 
-    if (input->down & PD_BTN_X) {
-        if (pd_platform_prompt_text("Server Host / IP", app->save.server_host,
-                                    sizeof(app->save.server_host), false)) {
+    if (input->touch_just_pressed && hit_bar == PD_NONE &&
+        input->touch_y >= 32 && input->touch_y < 164) {
+        int idx = (input->touch_y - 32) / 22;
+        if (idx >= 0 && idx < 6) {
+            if (idx == app->mp_menu_index) {
+                activate_row = true;
+            } else {
+                app->mp_menu_index = idx;
+            }
+        }
+    }
+
+    if ((input->down & PD_BTN_X) || hit_bar == 1) {
+        char host_port[160];
+        snprintf(host_port, sizeof(host_port), "%.120s:%u",
+                 app->save.server_host, (unsigned)app->save.server_port);
+        if (pd_platform_prompt_text("Server Host:Port", host_port,
+                                    sizeof(host_port), false)) {
+            pd_app_parse_host_port(app, host_port);
             pd_net_web_configure(&app->net, app->save.server_host,
                                  app->save.server_port, app->save.session_cookie);
             if (app->save_path[0] != '\0') {
@@ -1224,12 +1299,11 @@ static void pd_app_update_multiplayer(pd_app_t *app, const pd_input_t *input) {
         return;
     }
 
-    if (input->down & PD_BTN_Y) {
+    if ((input->down & PD_BTN_Y) || hit_bar == 2) {
         char code[64];
         memset(code, 0, sizeof(code));
         if (pd_platform_prompt_text("Enter Invite Code", code, sizeof(code), false) && code[0] != '\0') {
-            pd_net_web_configure(&app->net, app->save.server_host,
-                                 app->save.server_port, app->save.session_cookie);
+            pd_app_ensure_web_login(app);
             if (pd_net_web_join_game(&app->net, code)) {
                 pd_net_web_connect_socket(&app->net, app->net.game_id);
             }
@@ -1237,7 +1311,7 @@ static void pd_app_update_multiplayer(pd_app_t *app, const pd_input_t *input) {
         return;
     }
 
-    if (input->down & PD_BTN_A) {
+    if (activate_row) {
         switch (app->mp_menu_index) {
         case 0:
             pd_net_uds_host(&app->net, app->selected_variant);
@@ -1274,8 +1348,7 @@ static void pd_app_update_multiplayer(pd_app_t *app, const pd_input_t *input) {
             break;
         }
         case 4:
-            pd_net_web_configure(&app->net, app->save.server_host,
-                                 app->save.server_port, app->save.session_cookie);
+            pd_app_ensure_web_login(app);
             if (pd_net_web_create_game(&app->net, "pvp", NULL)) {
                 pd_net_web_connect_socket(&app->net, app->net.game_id);
                 snprintf(app->status_banner, sizeof(app->status_banner),
@@ -1289,11 +1362,10 @@ static void pd_app_update_multiplayer(pd_app_t *app, const pd_input_t *input) {
         default: {
             char invite_buf[64];
             memset(invite_buf, 0, sizeof(invite_buf));
-            if (!pd_platform_prompt_text("Invite Code or Game ID", invite_buf, sizeof(invite_buf), false)) {
+            if (!pd_platform_prompt_text("Invite Code (blank = Matchmake)", invite_buf, sizeof(invite_buf), false)) {
                 snprintf(invite_buf, sizeof(invite_buf), "%s", app->net.invite_code);
             }
-            pd_net_web_configure(&app->net, app->save.server_host,
-                                 app->save.server_port, app->save.session_cookie);
+            pd_app_ensure_web_login(app);
             if (invite_buf[0] != '\0' && pd_net_web_join_game(&app->net, invite_buf)) {
                 pd_net_web_connect_socket(&app->net, app->net.game_id);
                 snprintf(app->status_banner, sizeof(app->status_banner),
@@ -1320,23 +1392,25 @@ static void pd_app_update_multiplayer(pd_app_t *app, const pd_input_t *input) {
 }
 
 static void pd_app_update_stats(pd_app_t *app, const pd_input_t *input) {
-    if (input->down & PD_BTN_B) {
+    int hit_bar = input->touch_just_pressed ? pd_ui_hit_test_bottom_bar(input->touch_x, input->touch_y) : PD_NONE;
+
+    if ((input->down & PD_BTN_B) || hit_bar == 3) {
         app->screen = PD_SCREEN_TITLE;
         return;
     }
-    if (input->down & PD_BTN_X) {
+    if ((input->down & PD_BTN_X) || hit_bar == 1) {
         app->save.colorblind_mode = !app->save.colorblind_mode;
         if (app->save_path[0] != '\0') {
             pd_storage_save(&app->save, app->save_path);
         }
     }
-    if (input->down & PD_BTN_Y) {
+    if ((input->down & PD_BTN_Y) || hit_bar == 2) {
         app->save.show_threat_hints = !app->save.show_threat_hints;
         if (app->save_path[0] != '\0') {
             pd_storage_save(&app->save, app->save_path);
         }
     }
-    if ((input->down & PD_BTN_A) && app->save.replay_count > 0) {
+    if (((input->down & PD_BTN_A) || hit_bar == 0) && app->save.replay_count > 0) {
         int latest = (app->save.replay_head + PD_MAX_REPLAYS - 1) % PD_MAX_REPLAYS;
         if (latest >= app->save.replay_count) {
             latest = app->save.replay_count - 1;

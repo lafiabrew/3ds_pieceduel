@@ -214,12 +214,28 @@ bool pd_net_p2p_connect(pd_net_ctx_t *ctx, const char *host_ip, uint16_t tcp_por
         return false;
     }
 
-    if (connect(fd, (struct sockaddr *)&saddr, sizeof(saddr)) < 0) {
-        close(fd);
-        return false;
-    }
-
     set_nonblocking(fd);
+    int rc = connect(fd, (struct sockaddr *)&saddr, sizeof(saddr));
+    if (rc < 0) {
+        if (errno != EINPROGRESS && errno != EALREADY && errno != EWOULDBLOCK) {
+            close(fd);
+            return false;
+        }
+        struct pollfd pfd;
+        pfd.fd = fd;
+        pfd.events = POLLOUT;
+        pfd.revents = 0;
+        if (poll(&pfd, 1, 1500) <= 0) {
+            close(fd);
+            return false;
+        }
+        int so_err = 0;
+        socklen_t slen = sizeof(so_err);
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_err, &slen) < 0 || so_err != 0) {
+            close(fd);
+            return false;
+        }
+    }
     ctx->peer_fd = fd;
     ctx->mode = PD_NET_MODE_LAN_P2P;
     ctx->is_host = false;

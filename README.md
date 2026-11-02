@@ -71,19 +71,24 @@ flowchart TB
 
 | Input | Action in Match / Puzzles | Action in Menus / Replays |
 |---|---|---|
-| **Stylus Touch** | Tap any **4×4 Board Cell** to stage placement; tap any **Tray Piece** to hand it over | Tap menu rows, variant pills, or bottom action buttons |
-| **D-Pad / Circle Pad** | Move cursor across the 4×4 board or 16-piece tray | Navigate menu items / lobby rooms |
-| **A Button** | Confirm cell placement or piece gift | Select menu item / start mode |
+| **Stylus Touch** | Tap any **4×4 Board Cell** to stage placement; tap any **Tray Piece** to hand it over; tap bottom bar (`A:ACTION`, `X:HINTS`, `Y:COLOR`, `B:BACK`) | Tap menu rows, Title bottom variant/AI selector pills, Replay halves/bar, or Multiplayer/Stats bottom bar |
+| **D-Pad / Circle Pad** | Move cursor across the 4×4 board or 16-piece tray | Navigate menu items / lobby rooms / saved replays |
+| **A Button** | Confirm cell placement or piece gift | Select menu item / start mode / step forward in Replay |
 | **B Button** | Cancel staged placement or return to Title Menu | Back to Title Menu |
-| **X Button** | Toggle between Board cursor and Piece Tray cursor (or open Replay Coaching when finished) | Cycle AI Difficulty / Generate new trainer seed |
-| **Y Button** | Toggle Threat ("Hot Square") Hints | Reveal puzzle answer / Toggle Color-Blind palette |
-| **L / R Shoulders** | Step backward / forward in Daily Archive or Replay Scrubber | Cycle Rules Variant (`Standard` / `Misère` / `Advanced`) |
+| **X Button** | Toggle between Board cursor and Piece Tray cursor (or open Replay Coaching when finished) | Cycle AI Difficulty (Title) / Edit `Host:Port` (Multiplayer) / Toggle Color-Blind palette (Stats) |
+| **Y Button** | Toggle Threat ("Hot Square") Hints (or reveal answer in Daily/Trainers; tap `Y:COLOR` on bottom bar for Color-Blind palette) | Cycle AI Difficulty (Title) / Enter Invite Code (Multiplayer) / Toggle Threat Hints (Stats) |
+| **L / R Shoulders** | Toggle Board/Tray focus in Match; step backward/forward in Daily Archive; cycle Trainer mode | Cycle Rules Variant (`Standard` / `Misère` / `Advanced`) on Title; step Replay Scrubber |
 | **SELECT** | Offer / accept Rematch (or quick restart against AI) | — |
 | **START** | Cleanly exit to Homebrew Launcher / 3DS HOME Menu | Exit application |
 
 ---
 
-## Building (`Containerfile.3ds` or Native `devkitARM`)
+## Prerequisites & Building (`Containerfile.3ds` or Native `devkitARM`)
+
+### Host Prerequisites
+- **3DS Packaging (`make 3ds`)**: Rootless `podman` or `docker` + `python3` (no host `devkitPro` installation required).
+- **Host Unit & UI Simulation (`make test-host`)**: `gcc` (with `libasan` / `libubsan`) and `make`.
+- **Cross-Language Differential & Network Compatibility (`make test-compat`)**: Node.js $\ge 22.15$ (uses built-in TypeScript stripping + `module.registerHooks`) and an upstream `pieceduel` checkout (defaults to `/home/lafiamafia/sandbox/pieceduel/packages/engine/src/index.ts`, overridable via `PIECEDUEL_ENGINE_PATH=/path/to/pieceduel/packages/engine/src/index.ts`).
 
 The build requires **zero host privileges**: if `DEVKITARM` is not installed on
 the host, `make 3ds` automatically builds inside an OCI container
@@ -98,12 +103,14 @@ make verify-3ds
 ```
 
 Artifacts are written to `build/3ds/`:
-- `build/3ds/3ds_pieceduel.3dsx` — launch from **The Homebrew Launcher** or push live over Wi-Fi via `3dslink`.
-- `build/3ds/3ds_pieceduel.cia` — install directly to the 3DS HOME Menu using **FBI**.
+- `build/3ds/3ds_pieceduel.3dsx` (`.3dsx` = Homebrew Launcher executable) + `build/3ds/3ds_pieceduel.smdh` (`.smdh` = 3DS icon/title metadata) — launch from **The Homebrew Launcher** or push live over Wi-Fi via `3dslink`.
+- `build/3ds/3ds_pieceduel.cia` (`.cia` = CTR Importable Archive package) — install directly to the 3DS HOME Menu using **FBI** (the standard CFW 3DS package installer).
 
 ---
 
 ## Loading on a CFW 3DS
+
+> **Note on `sdmc:/`**: In 3DS homebrew, `sdmc:/` refers to the root directory of your 3DS microSD card.
 
 ### Option 1: Wireless Netload via `3dslink` (Fastest for Development)
 1. Open **The Homebrew Launcher** on your 3DS and press **Y** to open the `3dslink` receiver (note the IP shown on screen).
@@ -113,39 +120,55 @@ Artifacts are written to `build/3ds/`:
    ```
 
 ### Option 2: SD Card (`.3dsx` or `.cia`)
-- **Homebrew Launcher (`.3dsx`)**: Copy `build/3ds/3ds_pieceduel.3dsx` and `build/3ds/3ds_pieceduel.smdh` to `sdmc:/3ds/pieceduel/` on your SD card.
-- **HOME Menu (`.cia`)**: Copy `build/3ds/3ds_pieceduel.cia` to `sdmc:/cias/` on your SD card, open **FBI** on your 3DS, select **SD → cias → 3ds_pieceduel.cia → Install and delete CIA**.
+- **Homebrew Launcher (`.3dsx`)**: Copy `build/3ds/3ds_pieceduel.3dsx` and `build/3ds/3ds_pieceduel.smdh` to `sdmc:/3ds/pieceduel/` on your microSD card.
+- **HOME Menu (`.cia`)**: Copy `build/3ds/3ds_pieceduel.cia` to `sdmc:/cias/` on your microSD card, open **FBI** on your 3DS, select **SD → cias → 3ds_pieceduel.cia → Install and delete CIA**.
 
 ---
 
 ## Multiplayer Guide
 
-1. **Pass-and-Play (Single 3DS)**: Choose **Pass & Play** from the Title Menu and pass the console after each turn.
-2. **3DS-to-3DS Local Wireless (`UDS`)**: Choose **Multiplayer → Host 3DS Wireless** on one 3DS and **Join 3DS Wireless** on the second 3DS. Uses Nintendo's local ad-hoc wireless (`nwm::UDS`, comm ID `0x50443344`) — no Wi-Fi router needed.
-3. **Wi-Fi LAN P2P (`UDP/TCP`)**: Choose **Multiplayer → Host LAN Room** on one device and **Scan LAN Rooms** (or connect by IP) on another 3DS or PC host running on the same Wi-Fi network.
+From the Title Menu, select **`5. MULTIPLAYER (UDS/LAN/WEB)`**:
+
+1. **Pass-and-Play (Single 3DS)**: Choose **`2. PASS & PLAY (2P)`** directly from the Title Menu and pass the console after each turn.
+2. **3DS-to-3DS Local Wireless (`UDS`)**: Choose **`1. HOST 3DS LOCAL WIRELESS (UDS)`** on one 3DS and **`2. JOIN 3DS LOCAL WIRELESS (UDS)`** on the second 3DS. Uses Nintendo's local ad-hoc wireless (`nwm::UDS`, comm ID `0x50443344`) — no Wi-Fi router needed.
+3. **Wi-Fi LAN P2P (`UDP/TCP`)**: Choose **`3. HOST LAN P2P ROOM (UDP/TCP)`** on one device and **`4. SCAN & JOIN LAN P2P ROOM`** on another 3DS or PC host running on the same Wi-Fi network.
 4. **Cross-Play with `pieceduel` Web Server**:
-   - Point **Server Host / Port** in the Multiplayer menu at your running `pieceduel` server (default port `4321`, e.g. `192.168.1.50:4321`, seeded account `demo` / `pieceduel123`).
-   - Log in, then **Create Room** (displays a 6-character invite code that a browser or mobile player can join at `http://<host>:4321`), **Join by Invite Code**, or enter **Ranked Matchmaking**.
+   - Start your `pieceduel` web server on your LAN host (e.g. `cd ~/sandbox/pieceduel && npm run dev`, listening on port `4321`).
+   - **Important on physical 3DS hardware**: The default server host `127.0.0.1:4321` is for host/emulator testing; on a physical 3DS you must press **X** (or tap **`X:HOST IP`** on the bottom bar) in the Multiplayer screen to open the 3DS software keyboard (`swkbd`) and enter your LAN machine's IP and port (e.g. `192.168.1.50:4321`).
+   - Select **`5. WEB SERVER CREATE ROOM (LOGIN)`** (prompts for username/password via `swkbd` if not yet signed in, defaulting to `demo` / `pieceduel123`, then creates a room and displays its 6-character invite code) or **`6. WEB SERVER JOIN / MATCHMAKE`** (or press **Y** / tap **`Y:INVITE`** to join a 6-character invite code directly; leave the prompt blank on row 6 to enter Ranked Matchmaking).
 
 ---
 
 ## Automated Compatibility & Verification Suite
 
-We validate engine parity, network protocol interoperability, UI rendering, and
-ARM11 binary packaging automatically without requiring physical 3DS hardware in
-the loop:
+We validate engine parity, network protocol interoperability, UI rendering,
+ARM11 binary packaging, and documentation integrity automatically without
+requiring physical 3DS hardware in the loop:
 
 ```bash
 # Run native C11 unit tests + headless dual-screen UI/stereo simulation (with ASan/UBSan)
 make test-host
 
-# Run cross-language differential fuzzing (C11 vs TypeScript @pieceduel/engine)
-# + automated LAN P2P & Socket.IO v4 Web Cross-Play integration tests
+# Run 580-check cross-language differential suite (C11 vs TypeScript @pieceduel/engine)
+# + automated LAN P2P, UDS simulation, and Socket.IO v4 Web Cross-Play integration tests
 make test-compat
 
 # Run all host + compatibility tests
 make test
+
+# Run deterministic documentation structure and link check
+bash scripts/check-docs.sh
 ```
+
+---
+
+## Documentation Index
+
+- **Operational & Build Guide**: [`AGENTS.md`](AGENTS.md)
+- **Implementation Plan & Task Ledger**: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
+- **Architectural Constitution**: [`specs/CONSTITUTION.md`](specs/CONSTITUTION.md)
+- **Domain Glossary**: [`specs/CONTEXT.md`](specs/CONTEXT.md)
+- **Documentation Audit Trail**: [`docs/audit/README.md`](docs/audit/README.md)
 
 ---
 

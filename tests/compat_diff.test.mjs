@@ -30,7 +30,10 @@ registerHooks({
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const PD_CLI = path.join(ROOT, "build", "host", "pd_cli");
-const ENGINE_INDEX = path.resolve("/home/lafiamafia/sandbox/pieceduel/packages/engine/src/index.ts");
+const ENGINE_INDEX = path.resolve(
+  process.env.PIECEDUEL_ENGINE_PATH ??
+    "/home/lafiamafia/sandbox/pieceduel/packages/engine/src/index.ts",
+);
 
 function runCli(args) {
   const out = execFileSync(PD_CLI, args.map(String), { encoding: "utf8" });

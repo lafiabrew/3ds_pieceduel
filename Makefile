@@ -81,7 +81,7 @@ test: test-host test-compat
 	@mkdir -p build/3ds
 	$(DEVKITARM)/bin/arm-none-eabi-gcc \
 		-march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft \
-		-std=gnu11 -Wall -Wextra -O2 -ffunction-sections -fdata-sections \
+		-std=gnu11 -Wall -Wextra -Werror -O2 -ffunction-sections -fdata-sections \
 		-D__3DS__ -Iinclude \
 		-I$(DEVKITPRO)/libctru/include \
 		$(ENGINE_SRCS) $(NET_SRCS) $(APP_SRCS) src/platform/platform_3ds.c src/main.c \

@@ -476,8 +476,8 @@ static void render_bottom_title(const pd_app_t *app) {
         "2. PASS & PLAY (2P)",
         "3. DAILY PUZZLE",
         "4. TACTICS TRAINERS",
-        "5. INTERACTIVE TUTORIAL",
-        "6. MULTIPLAYER (UDS/LAN/WEB)",
+        "5. MULTIPLAYER (UDS/LAN/WEB)",
+        "6. INTERACTIVE TUTORIAL",
         "7. REPLAYS & STATS"
     };
 
@@ -505,52 +505,68 @@ static void render_bottom_multiplayer_or_stats(const pd_app_t *app) {
 
     if (app->screen == PD_SCREEN_MULTIPLAYER) {
         const char *mp_opts[6] = {
-            "HOST 3DS LOCAL WIRELESS (UDS)",
-            "JOIN 3DS LOCAL WIRELESS (UDS)",
-            "HOST LAN P2P ROOM (UDP/TCP)",
-            "SCAN & JOIN LAN P2P ROOM",
-            "WEB SERVER LOGIN & MATCHMAKE",
-            "BACK TO TITLE"
+            "1. HOST 3DS LOCAL WIRELESS (UDS)",
+            "2. JOIN 3DS LOCAL WIRELESS (UDS)",
+            "3. HOST LAN P2P ROOM (UDP/TCP)",
+            "4. SCAN & JOIN LAN P2P ROOM",
+            "5. WEB SERVER CREATE ROOM (LOGIN)",
+            "6. WEB SERVER JOIN / MATCHMAKE"
         };
         for (int i = 0; i < 6; i++) {
-            float y = 36.0f + (float)i * 24.0f;
+            float y = 32.0f + (float)i * 22.0f;
             bool sel = (app->mp_menu_index == i);
-            pd_draw_rect(12.0f, y, 296.0f, 20.0f, sel ? COL_PANEL_ALT : COL_PANEL);
-            pd_draw_rect_outline(12.0f, y, 296.0f, 20.0f, 1.0f, sel ? COL_ACCENT : COL_BORDER);
-            pd_draw_text(18.0f, y + 6.0f, 0.5f, sel ? COL_ACCENT : COL_TEXT, mp_opts[i]);
+            pd_draw_rect(12.0f, y, 296.0f, 19.0f, sel ? COL_PANEL_ALT : COL_PANEL);
+            pd_draw_rect_outline(12.0f, y, 296.0f, 19.0f, 1.0f, sel ? COL_ACCENT : COL_BORDER);
+            pd_draw_text(18.0f, y + 5.0f, 0.5f, sel ? COL_ACCENT : COL_TEXT, mp_opts[i]);
         }
         char net_info[256];
-        snprintf(net_info, sizeof(net_info), "BEACONS: %d  HOST: %.24s:%u",
+        snprintf(net_info, sizeof(net_info), "BEACONS:%d HOST:%.20s:%u (X:IP Y:CODE)",
                  app->net.beacon_count, app->save.server_host, (unsigned)app->save.server_port);
-        pd_draw_text(12.0f, 190.0f, 0.5f, COL_TEXT_MUTED, net_info);
+        pd_draw_text(12.0f, 172.0f, 0.48f, COL_TEXT_MUTED, net_info);
+
+        const char *mp_bar[4] = { "A:SELECT", "X:HOST IP", "Y:INVITE", "B:BACK" };
+        for (int i = 0; i < 4; i++) {
+            float bx = 12.0f + (float)i * 74.0f;
+            pd_draw_rect(bx, 194.0f, 70.0f, 36.0f, COL_PANEL_ALT);
+            pd_draw_rect_outline(bx, 194.0f, 70.0f, 36.0f, 1.5f, COL_BORDER);
+            pd_draw_text(bx + 6.0f, 207.0f, 0.48f, COL_TEXT, mp_bar[i]);
+        }
     } else {
         char line[64];
         snprintf(line, sizeof(line), "ELO RATING: %d", app->save.elo_rating);
-        pd_draw_text(16.0f, 44.0f, 0.55f, COL_ACCENT, line);
+        pd_draw_text(16.0f, 40.0f, 0.55f, COL_ACCENT, line);
 
         snprintf(line, sizeof(line), "AI EASY   W:%d L:%d D:%d",
                  app->save.ai_wins[0], app->save.ai_losses[0], app->save.ai_draws[0]);
-        pd_draw_text(16.0f, 68.0f, 0.5f, COL_TEXT, line);
+        pd_draw_text(16.0f, 62.0f, 0.5f, COL_TEXT, line);
 
         snprintf(line, sizeof(line), "AI MEDIUM W:%d L:%d D:%d",
                  app->save.ai_wins[1], app->save.ai_losses[1], app->save.ai_draws[1]);
-        pd_draw_text(16.0f, 84.0f, 0.5f, COL_TEXT, line);
+        pd_draw_text(16.0f, 78.0f, 0.5f, COL_TEXT, line);
 
         snprintf(line, sizeof(line), "AI HARD   W:%d L:%d D:%d",
                  app->save.ai_wins[2], app->save.ai_losses[2], app->save.ai_draws[2]);
-        pd_draw_text(16.0f, 100.0f, 0.5f, COL_TEXT, line);
+        pd_draw_text(16.0f, 94.0f, 0.5f, COL_TEXT, line);
 
         snprintf(line, sizeof(line), "PVP       W:%d L:%d D:%d",
                  app->save.pvp_wins, app->save.pvp_losses, app->save.pvp_draws);
-        pd_draw_text(16.0f, 118.0f, 0.5f, COL_TEXT, line);
+        pd_draw_text(16.0f, 112.0f, 0.5f, COL_TEXT, line);
 
         snprintf(line, sizeof(line), "DAILY STREAK: %d (BEST %d)",
                  app->save.streak_current, app->save.streak_best);
-        pd_draw_text(16.0f, 138.0f, 0.5f, COL_THREAT, line);
+        pd_draw_text(16.0f, 132.0f, 0.5f, COL_THREAT, line);
 
-        snprintf(line, sizeof(line), "SAVED REPLAYS: %d (PRESS A TO REVIEW)",
+        snprintf(line, sizeof(line), "SAVED REPLAYS: %d (A: REVIEW)",
                  app->save.replay_count);
-        pd_draw_text(16.0f, 160.0f, 0.5f, COL_WIN_GLOW, line);
+        pd_draw_text(16.0f, 152.0f, 0.5f, COL_WIN_GLOW, line);
+
+        const char *st_bar[4] = { "A:REPLAYS", "X:COLOR", "Y:HINTS", "B:BACK" };
+        for (int i = 0; i < 4; i++) {
+            float bx = 12.0f + (float)i * 74.0f;
+            pd_draw_rect(bx, 194.0f, 70.0f, 36.0f, COL_PANEL_ALT);
+            pd_draw_rect_outline(bx, 194.0f, 70.0f, 36.0f, 1.5f, COL_BORDER);
+            pd_draw_text(bx + 6.0f, 207.0f, 0.48f, COL_TEXT, st_bar[i]);
+        }
     }
 }
 
