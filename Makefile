@@ -42,7 +42,7 @@ OCI_RUNTIME := $(shell command -v podman 2>/dev/null || command -v docker 2>/dev
 OCI_IMAGE   := localhost/pieceduel-3ds-toolchain:latest
 OCI_USER    := $(if $(findstring podman,$(OCI_RUNTIME)),--userns=keep-id,-u $(shell id -u):$(shell id -g))
 
-.PHONY: all host test test-host test-compat 3ds 3ds-native 3ds-container assets verify-3ds netload clean
+.PHONY: all host test test-host test-compat 3ds 3ds-native 3ds-container assets verify-3ds netload qr serve-cia clean
 
 all: test
 
@@ -119,6 +119,9 @@ netload:
 	else \
 		$(OCI_RUNTIME) run --rm --net=host -v "$(CURDIR):/work:Z" -w /work $(OCI_IMAGE) 3dslink -a "$(IP)" build/3ds/$(TARGET).3dsx; \
 	fi
+
+qr serve-cia:
+	python3 ../serve_3ds.py $(TARGET) $(if $(IP),--push $(IP),)
 
 clean:
 	rm -rf build/ meta/icon.png meta/banner.png meta/audio.wav meta/banner.bnr

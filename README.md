@@ -112,14 +112,23 @@ Artifacts are written to `build/3ds/`:
 
 > **Note on `sdmc:/`**: In 3DS homebrew, `sdmc:/` refers to the root directory of your 3DS microSD card.
 
-### Option 1: Wireless Netload via `3dslink` (Fastest for Development)
+### Option 1: FBI QR Code / Network Server (`../serve_3ds.py` or `make qr`)
+1. Start the shared 3DS Homebrew QR & FBI Hub (auto-discovers all `.cia` and `.3dsx` packages under `/home/lafiamafia/homebrew/3ds/`):
+   ```bash
+   make qr
+   # or from /home/lafiamafia/homebrew/3ds:
+   python3 ../serve_3ds.py
+   ```
+2. On your 3DS, open **FBI → Remote Install → Scan QR Code** and scan the QR code printed in your terminal (or open `http://<your-lan-ip>:8765/` in a browser for a crisp SVG QR code and one-click **Push to FBI (:5000)**).
+
+### Option 2: Wireless Netload via `3dslink` (Fastest for Iteration)
 1. Open **The Homebrew Launcher** on your 3DS and press **Y** to open the `3dslink` receiver (note the IP shown on screen).
 2. Run:
    ```bash
    make netload IP=192.168.1.XXX
    ```
 
-### Option 2: SD Card (`.3dsx` or `.cia`)
+### Option 3: SD Card (`.3dsx` or `.cia`)
 - **Homebrew Launcher (`.3dsx`)**: Copy `build/3ds/3ds_pieceduel.3dsx` and `build/3ds/3ds_pieceduel.smdh` to `sdmc:/3ds/pieceduel/` on your microSD card.
 - **HOME Menu (`.cia`)**: Copy `build/3ds/3ds_pieceduel.cia` to `sdmc:/cias/` on your microSD card, open **FBI** on your 3DS, select **SD → cias → 3ds_pieceduel.cia → Install and delete CIA**.
 

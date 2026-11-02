@@ -26,6 +26,9 @@ make 3ds
 # Verify ELF machine type (ARM11), SMDH size (0x36C0), 3DSX header, and CIA header (0x2020)
 make verify-3ds
 
+# Serve .cia over HTTP with a scannable FBI QR code (and web hub at :8765)
+make qr
+
 # Push 3ds_pieceduel.3dsx over Wi-Fi to Homebrew Launcher (press Y on 3DS first)
 make netload IP=192.168.1.XXX
 ```
