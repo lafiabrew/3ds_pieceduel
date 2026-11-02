@@ -9,8 +9,23 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import { registerHooks } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.startsWith(".") && !path.extname(specifier) && context.parentURL) {
+      const parentDir = path.dirname(fileURLToPath(context.parentURL));
+      const candidate = path.resolve(parentDir, `${specifier}.ts`);
+      if (fs.existsSync(candidate)) {
+        return nextResolve(pathToFileURL(candidate).href, context);
+      }
+    }
+    return nextResolve(specifier, context);
+  },
+});
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
