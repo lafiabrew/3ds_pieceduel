@@ -1241,6 +1241,12 @@ static void pd_app_ensure_web_login(pd_app_t *app) {
 static void pd_app_update_multiplayer(pd_app_t *app, const pd_input_t *input) {
     if (app->net.mode != PD_NET_MODE_NONE && app->net.state != PD_NET_STATE_IDLE) {
         pd_net_poll(&app->net);
+        if (app->net.state == PD_NET_STATE_SCANNING &&
+            app->net.mode == PD_NET_MODE_LAN_P2P &&
+            app->net.beacon_count > 0) {
+            pd_net_p2p_connect(&app->net, app->net.beacons[0].ip_addr,
+                               app->net.beacons[0].tcp_port);
+        }
         if (app->net.state == PD_NET_STATE_ACTIVE) {
             pd_game_mode_t gmode = PD_GAME_MODE_P2P_LAN;
             if (app->net.mode == PD_NET_MODE_UDS) {
@@ -1332,19 +1338,24 @@ static void pd_app_update_multiplayer(pd_app_t *app, const pd_input_t *input) {
                      "Hosting LAN P2P on TCP %u", PD_P2P_DEFAULT_TCP_PORT);
             break;
         case 3: {
-            char ip_buf[64];
-            snprintf(ip_buf, sizeof(ip_buf), "%.63s", app->save.server_host);
-            if (pd_platform_prompt_text("Host LAN IP", ip_buf, sizeof(ip_buf), false) && ip_buf[0] != '\0') {
-                pd_net_p2p_connect(&app->net, ip_buf, PD_P2P_DEFAULT_TCP_PORT);
+            pd_net_p2p_start_scan(&app->net, PD_P2P_DEFAULT_UDP_PORT);
+            pd_net_poll(&app->net);
+            if (app->net.beacon_count > 0) {
+                pd_net_p2p_connect(&app->net, app->net.beacons[0].ip_addr,
+                                   app->net.beacons[0].tcp_port);
+                snprintf(app->status_banner, sizeof(app->status_banner),
+                         "Connected to LAN Beacon %s", app->net.beacons[0].host_name);
             } else {
-                pd_net_p2p_start_scan(&app->net, PD_P2P_DEFAULT_UDP_PORT);
-                pd_net_poll(&app->net);
-                if (app->net.beacon_count > 0) {
-                    pd_net_p2p_connect(&app->net, app->net.beacons[0].ip_addr,
-                                       app->net.beacons[0].tcp_port);
+                char ip_buf[64] = {0};
+                if (pd_platform_prompt_text("Host LAN IP (blank=scan)", ip_buf, sizeof(ip_buf), false) &&
+                    ip_buf[0] != '\0') {
+                    pd_net_p2p_connect(&app->net, ip_buf, PD_P2P_DEFAULT_TCP_PORT);
+                    snprintf(app->status_banner, sizeof(app->status_banner), "Connecting LAN P2P...");
+                } else {
+                    snprintf(app->status_banner, sizeof(app->status_banner),
+                             "Scanning LAN UDP %u for hosts...", PD_P2P_DEFAULT_UDP_PORT);
                 }
             }
-            snprintf(app->status_banner, sizeof(app->status_banner), "Connecting LAN P2P...");
             break;
         }
         case 4:

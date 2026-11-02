@@ -278,6 +278,14 @@ static void record_beacon(pd_net_ctx_t *ctx, const char *ip, const char *host_na
 bool pd_net_p2p_poll(pd_net_ctx_t *ctx) {
     if (!ctx) return false;
     bool activity = false;
+    static unsigned s_beacon_tick = 0;
+
+    /* 0. Periodically broadcast UDP discovery beacon while hosting in lobby */
+    if (ctx->is_host && ctx->state == PD_NET_STATE_HOSTING && ctx->peer_fd < 0 && ctx->udp_fd >= 0) {
+        if ((s_beacon_tick++ % 30u) == 0u) {
+            (void)pd_net_p2p_send_beacon(ctx, "255.255.255.255", PD_P2P_DEFAULT_UDP_PORT);
+        }
+    }
 
     /* 1. Check incoming UDP beacons when scanning */
     if (ctx->state == PD_NET_STATE_SCANNING && ctx->udp_fd >= 0) {
