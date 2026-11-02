@@ -1,0 +1,16 @@
+build/
+*.o
+*.d
+*.elf
+*.3dsx
+*.smdh
+*.cia
+*.bnr
+*.icn
+meta/icon.png
+meta/banner.png
+meta/banner.cgfx
+meta/audio.bcwav
+tests/*.dat
+tests/*.tmp
+node_modules/
