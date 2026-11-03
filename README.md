@@ -6,6 +6,10 @@
   <img src="docs/banner.png" width="256" height="128" alt="3ds_pieceduel 3DS banner" />
 </p>
 
+<p align="center">
+  <img src="docs/screenshot.png" width="360" alt="3ds_pieceduel dual-screen 3DS preview" />
+</p>
+
 **3ds_pieceduel** is a native C11 Nintendo 3DS homebrew shared-trait
 four-in-a-row abstract strategy duel (you hand your opponent the piece they must
 place). Built with `libctru` and `citro2d` for Custom Firmware (CFW) 3DS

@@ -226,7 +226,16 @@ void pd_render_begin_target(pd_render_target_t target, uint32_t clear_color) {
 }
 
 void pd_render_end_frame(void) {
-    /* Software framebuffers remain available for host inspection */
+    const char *dump_path = getenv("PK_DUMP_FRAMEBUFFER");
+    if (dump_path != NULL && dump_path[0] != '\0') {
+        FILE *fp = fopen(dump_path, "wb");
+        if (fp != NULL) {
+            fwrite(fb_top_left, sizeof(uint32_t), PD_TOP_WIDTH * PD_TOP_HEIGHT, fp);
+            fwrite(fb_bot, sizeof(uint32_t), PD_BOT_WIDTH * PD_BOT_HEIGHT, fp);
+            fclose(fp);
+        }
+        g_host_running = false;
+    }
 }
 
 void pd_draw_rect(float x, float y, float w, float h, uint32_t color) {
